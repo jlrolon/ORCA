@@ -111,6 +111,8 @@ function computeAgentLabel(title: string): string | null {
   }
   if (titleHasAgentName(title, 'jcode')) {
     return 'Jcode'
+  if (titleHasAgentName(title, 'junie')) {
+    return 'Junie'
   }
   if (titleHasAgentName(title, 'antigravity') || AGY_AGENT_NAME_RE.test(title)) {
     return 'Antigravity'
