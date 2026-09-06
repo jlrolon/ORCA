@@ -8,6 +8,10 @@ import {
   confirmRuntimeTerminalForegroundProcess,
   inspectRuntimeTerminalProcess
 } from '@/runtime/runtime-terminal-inspection'
+import {
+  registerPtyKittyKeyboardModeTracker,
+  unregisterPtyKittyKeyboardModeTracker
+} from '../terminal-pty-kitty-keyboard-flags'
 import { isFreshNonDoneAgentStatus } from '../../../../../shared/agent-status-types'
 import { isCtrlCKeyEvent, isPlainEscapeKeyEvent } from '../agent-interrupt-inference'
 import { createAgentCompletionCoordinator } from '../agent-completion-coordinator'
@@ -78,6 +82,11 @@ export function installTerminalKeydownFit(session: ConnectPanePtySession): void 
   session.visibleRemoteViewportClaimPtyId = null
   session.pendingVisibleRemoteViewportClaim = false
   session.setPanePtyFitBinding = (ptyId: string): void => {
+    const previousPtyId = session.activePanePtyBinding
+    if (previousPtyId && previousPtyId !== ptyId) {
+      unregisterPtyKittyKeyboardModeTracker(previousPtyId, session.kittyKeyboardModes)
+    }
+    registerPtyKittyKeyboardModeTracker(ptyId, session.kittyKeyboardModes)
     bindPanePtyId(session.pane.id, ptyId, session.deps.tabId)
     session.pane.container.dataset.ptyId = ptyId
     if (
@@ -160,6 +169,12 @@ export function installTerminalKeydownFit(session: ConnectPanePtySession): void 
   }
   session.clearPanePtyFitBinding = (): void => {
     // Clear module-level fit bindings explicitly; DOM removal cannot release them.
+    if (session.activePanePtyBinding) {
+      unregisterPtyKittyKeyboardModeTracker(
+        session.activePanePtyBinding,
+        session.kittyKeyboardModes
+      )
+    }
     bindPanePtyId(session.pane.id, null, session.deps.tabId)
     session.visibleRemoteViewportClaimPtyId = null
     session.pendingVisibleRemoteViewportClaim = false

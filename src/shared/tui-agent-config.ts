@@ -10,8 +10,6 @@ export type {
   TuiAgentDetectionRuntime
 } from './tui-agent-config-types'
 
-export type AgentPostPasteSubmitInput = 'enter' | 'ctrl-enter'
-
 function resolveTuiAgentConfig(source: TuiAgentConfigSource): TuiAgentConfig {
   return {
     ...source,
@@ -73,8 +71,7 @@ const TUI_AGENT_CONFIG_SOURCE: Record<TuiAgent, TuiAgentConfigSource> = {
     preflightTrust: 'codex',
     draftPasteReadySignal: 'codex-composer-prompt',
     draftPasteReadyTimeoutMs: 20_000,
-    submitRetryDelayMs: 1200,
-    postPasteSubmitInput: 'ctrl-enter'
+    submitRetryDelayMs: 1200
   },
   autohand: { detectCmd: 'autohand', promptInjectionMode: 'stdin-after-start' },
   ante: {
