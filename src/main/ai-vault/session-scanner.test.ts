@@ -396,7 +396,7 @@ describe('scanAiVaultSessions', () => {
   it('indexes every supported agent transcript format with native resume commands', async () => {
     const root = await mkdtemp(join(tmpdir(), 'orca-ai-vault-all-agents-'))
     tempRoots.push(root)
-    const { roots, antigravitySessionId, ompSessionFile, primeAgentSessionFile } =
+    const { roots, antigravitySessionId, ompSessionFile, primeAgentSessionFile, junieSessionId } =
       await writeEveryAgentVault(root)
 
     // Allow multiple fixtures per agent without evicting another agent under the recency cap.
@@ -405,10 +405,6 @@ describe('scanAiVaultSessions', () => {
       platform: 'darwin',
       limit: AI_VAULT_AGENTS.length * 2
     })
-
-    const junieSessionId = await writeJunieScannerFixture(roots.junieSessionsDir)
-
-    const result = await scanAiVaultSessions({ ...roots, platform: 'darwin', limit: 25 })
 
     expect(result.issues).toEqual([])
     expect(new Set(result.sessions.map((session) => session.agent))).toEqual(
