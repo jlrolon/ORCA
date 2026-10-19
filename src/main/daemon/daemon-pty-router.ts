@@ -63,6 +63,7 @@ export class DaemonPtyRouter implements IPtyProvider {
     this.legacyExitProof.record(this.legacy)
   }
 
+  /** Resolves live sessions across generations and sweeps any generation the inventory proves empty. */
   async discoverLegacySessions(): Promise<void> {
     await this.ownerResolver.discoverRoutes()
     this.legacyExitProof.record(this.legacy)
@@ -272,6 +273,7 @@ export class DaemonPtyRouter implements IPtyProvider {
     await this.current.revive(state)
   }
 
+  /** Aggregates every generation's PTYs; a legacy adapter whose endpoint provably died detaches here. */
   async listProcesses(opts?: Parameters<IPtyProvider['listProcesses']>[0]) {
     // Only an established route skips owner resolution; everyone else keeps complete-inventory proof.
     if (opts?.targetOwnerOnly && opts.ptyIds?.every((id) => this.sessionAdapters.has(id))) {
@@ -281,6 +283,7 @@ export class DaemonPtyRouter implements IPtyProvider {
     this.legacyExitProof.record(this.legacy)
     return processes
   }
+
   private retireExitedLegacy(adapter: DaemonPtyAdapter, error: unknown): ExitedLegacyVerdict {
     const { current, legacy, legacyExitProof: exitProof, legacyDrain } = this
     const verdict = retireExitedLegacyAdapter({
@@ -336,6 +339,7 @@ export class DaemonPtyRouter implements IPtyProvider {
     return reconcileDaemonRouterSessions(this.allAdapters(), this.ownerResolver, validWorktreeIds)
   }
 
+  /** Tears down drain checks, subscriptions, and every adapter (full shutdown path). */
   dispose(): void {
     this.legacyDrain.drain.dispose()
     this.legacyDrain.fanout.dispose()
@@ -344,7 +348,8 @@ export class DaemonPtyRouter implements IPtyProvider {
     }
   }
 
-  // Restart reuses legacy adapters; detach subscriptions without disposing those adapters.
+  // Why: restart reuses the legacy adapters in a new router, so detach only our subscriptions (dispose() would tear them down; skipping this leaked a router per restart).
+  /** Detaches only this router's subscriptions; adapters survive reuse by a restart's router. */
   disposeRouterOnly(): void {
     this.legacyDrain.drain.dispose()
     this.legacyDrain.fanout.dispose()

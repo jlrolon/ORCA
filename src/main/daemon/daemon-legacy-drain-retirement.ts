@@ -58,6 +58,7 @@ export class LegacyDaemonDrainRetirement {
   /** Drops pending drain checks; call when the owning router is torn down (quit or restart swap). */
   dispose(): void {
     this.disposed = true
+    this.pendingAfterFlight.clear()
     for (const handle of this.timers.values()) {
       clearTimeout(handle)
     }
@@ -66,7 +67,12 @@ export class LegacyDaemonDrainRetirement {
 
   /** One census attempt: local route check, then the daemon-side verdict decides detach vs stay. */
   private async retireIfDrained(adapter: DaemonPtyAdapter): Promise<void> {
-    if (this.disposed || this.checksInFlight.has(adapter)) {
+    if (this.disposed) {
+      return
+    }
+    if (this.checksInFlight.has(adapter)) {
+      // Why: the in-flight census may predate this drain signal; the finally below retries it.
+      this.pendingAfterFlight.add(adapter)
       return
     }
     if (!this.deps.isLegacyAdapter(adapter) || this.deps.ownsRoutedSession(adapter)) {
@@ -82,6 +88,9 @@ export class LegacyDaemonDrainRetirement {
       return
     } finally {
       this.checksInFlight.delete(adapter)
+      if (!this.disposed && this.pendingAfterFlight.delete(adapter)) {
+        this.scheduleDrainCheck(adapter)
+      }
     }
     // Why: the router may have been replaced (restart) while the census ran.
     if (this.disposed || !this.deps.isLegacyAdapter(adapter)) {
@@ -96,6 +105,8 @@ export class LegacyDaemonDrainRetirement {
 
   private readonly timers = new Map<DaemonPtyAdapter, ReturnType<typeof setTimeout>>()
   private readonly checksInFlight = new Set<DaemonPtyAdapter>()
+  // Why: a signal arriving mid-census must survive a busy/unverifiable verdict (#29970 review).
+  private readonly pendingAfterFlight = new Set<DaemonPtyAdapter>()
   private disposed = false
 }
 

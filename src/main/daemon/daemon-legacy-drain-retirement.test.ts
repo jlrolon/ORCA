@@ -152,6 +152,32 @@ describe('LegacyDaemonDrainRetirement', () => {
     expect(drained.deps.detachAdapter).toHaveBeenCalled()
   })
 
+  it('retries a drain signal that arrived while a census was in flight', async () => {
+    const { adapter, deps, scheduler } = createHarness()
+    let releaseFirst: (value: { state: 'busy'; liveSessions: number }) => void = () => {}
+    const firstCensus = new Promise<{ state: 'busy'; liveSessions: number }>((resolve) => {
+      releaseFirst = resolve
+    })
+    deps.requestIdleRetirement
+      .mockReturnValueOnce(firstCensus)
+      .mockReturnValueOnce(Promise.resolve({ state: 'busy', liveSessions: 1 }))
+
+    scheduler.scheduleDrainCheck(adapter)
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
+    // Session B exits while B's predecessor is still being censused.
+    scheduler.scheduleDrainCheck(adapter)
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
+    expect(deps.requestIdleRetirement).toHaveBeenCalledTimes(1)
+
+    // Why busy: B was still alive when the first census ran; the dropped signal would leak it.
+    releaseFirst({ state: 'busy', liveSessions: 1 })
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
+
+    expect(deps.requestIdleRetirement).toHaveBeenCalledTimes(2)
+    expect(deps.detachAdapter).not.toHaveBeenCalled()
+  })
+
   it('dispose cancels pending drain checks', async () => {
     const { adapter, deps, scheduler } = createHarness()
 
