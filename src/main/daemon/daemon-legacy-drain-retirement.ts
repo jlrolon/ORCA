@@ -55,6 +55,7 @@ export class LegacyDaemonDrainRetirement {
     }
   }
 
+  /** Drops pending drain checks; call when the owning router is torn down (quit or restart swap). */
   dispose(): void {
     this.disposed = true
     for (const handle of this.timers.values()) {
@@ -63,6 +64,7 @@ export class LegacyDaemonDrainRetirement {
     this.timers.clear()
   }
 
+  /** One census attempt: local route check, then the daemon-side verdict decides detach vs stay. */
   private async retireIfDrained(adapter: DaemonPtyAdapter): Promise<void> {
     if (this.disposed || this.checksInFlight.has(adapter)) {
       return
