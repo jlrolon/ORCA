@@ -104,7 +104,9 @@ async function publishOpenedChat(workspace: string, sessionId: string) {
       id: sessionId,
       entityId: sessionId,
       executionHostId: LOCAL_EXECUTION_HOST_ID,
-      agentSessionAgent: 'claude'
+      agentSessionAgent: 'claude',
+      // Why: the host's snapshot appends to the group; it never takes the lone-pane auto-split.
+      placementFixed: true
     })
   }
 }
@@ -355,7 +357,9 @@ describe('Session History keyboard selection', () => {
         id,
         entityId: id,
         executionHostId: LOCAL_EXECUTION_HOST_ID,
-        agentSessionAgent: 'claude'
+        agentSessionAgent: 'claude',
+        // Why: seeds chats of one pane; the lone-pane auto-split would open 'other' beside 'old'.
+        placementFixed: true
       })
     }
     main = await drawTabsFromMain(useAppStore)
@@ -496,7 +500,9 @@ describe('Session History keyboard selection', () => {
         id,
         entityId: id,
         executionHostId: LOCAL_EXECUTION_HOST_ID,
-        agentSessionAgent: 'claude'
+        agentSessionAgent: 'claude',
+        // Why: seeds chats of one pane; the lone-pane auto-split would open 'other' beside 'old'.
+        placementFixed: true
       })
     }
     main = await drawTabsFromMain(useAppStore)
