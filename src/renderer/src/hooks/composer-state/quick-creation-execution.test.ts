@@ -105,7 +105,8 @@ it('retains the accepted route and resolves project task drafts for either launc
       useAppStore.setState({
         settings: {
           ...settings,
-          nativeChatProviders: route === 'terminal-tui' ? EVERY_AGENT_CHAT : {}
+          nativeChatProviders: route === 'terminal-tui' ? EVERY_AGENT_CHAT : {},
+          linkedWorkItemPromptTemplate: '{{url}} /skill'
         }
       })
       await act(async () => {
