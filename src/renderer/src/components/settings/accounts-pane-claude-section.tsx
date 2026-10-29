@@ -8,6 +8,7 @@ import { Label } from '../ui/label'
 import { ClaudeIcon } from '../status-bar/icons'
 import { SearchableSetting } from './SearchableSetting'
 import { renderClaudeAutoSwitchSetting } from './accounts-pane-claude-auto-switch'
+import { ClaudeAuthProxySetting } from './claude-auth-proxy-setting'
 import { ClaudeRunningSessionSwitchSetting } from './claude-running-session-switch-setting'
 import {
   getProviderAccountRuntime,
@@ -386,7 +387,10 @@ export function renderClaudeAccountsSection(model: AccountsPaneSectionModel): Re
       </SearchableSetting>
       {renderClaudeAutoSwitchSetting(model)}
       {isRemoteAccountScope ? null : (
-        <ClaudeRunningSessionSwitchSetting settings={settings} updateSettings={updateSettings} />
+        <>
+          <ClaudeRunningSessionSwitchSetting settings={settings} updateSettings={updateSettings} />
+          <ClaudeAuthProxySetting settings={settings} updateSettings={updateSettings} />
+        </>
       )}
     </section>
   )
