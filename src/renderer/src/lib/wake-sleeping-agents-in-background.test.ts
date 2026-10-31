@@ -1,7 +1,12 @@
 // @vitest-environment happy-dom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import '@/constants/terminal'
+import {
+  BACKGROUND_MOUNT_TERMINAL_WORKTREE_EVENT,
+  WAKE_HIBERNATED_AGENTS_WORKTREE_EVENT,
+  type BackgroundMountTerminalWorktreeDetail,
+  type WakeHibernatedAgentsWorktreeDetail
+} from '@/constants/terminal'
 import { listenForHibernatedAgentWake } from '@/components/terminal-pane/hibernated-agent-wake-listener'
 import type { ResumeSleepingAgentSessionsOptions } from './resume-sleeping-agent-session'
 import type { SleepingAgentSessionRecord } from '../../../shared/agent-session/lifecycle/agent-session-resume'
@@ -51,7 +56,44 @@ import {
   createBackgroundSleepingAgentWakeDispatcher,
   wakeSleepingAgentsForWorktreeInBackground
 } from './wake-sleeping-agents-in-background'
-import { takeSleepingAgentWakeRequest } from './sleeping-agent-wake-requests'
+import {
+  hasSleepingAgentWakeRequest,
+  takeSleepingAgentWakeRequest
+} from './sleeping-agent-wake-requests'
+
+type RecordedEvents = {
+  events: string[]
+  mountDetails: BackgroundMountTerminalWorktreeDetail[]
+  wakeDetails: WakeHibernatedAgentsWorktreeDetail[]
+  stop: () => void
+}
+
+function recordEvents(): RecordedEvents {
+  const events: string[] = []
+  const mountDetails: BackgroundMountTerminalWorktreeDetail[] = []
+  const wakeDetails: WakeHibernatedAgentsWorktreeDetail[] = []
+  const onWake = (event: Event): void => {
+    const detail = (event as CustomEvent<WakeHibernatedAgentsWorktreeDetail>).detail
+    events.push(`wake:${detail.worktreeId}`)
+    wakeDetails.push(detail)
+  }
+  const onMount = (event: Event): void => {
+    const detail = (event as CustomEvent<BackgroundMountTerminalWorktreeDetail>).detail
+    events.push(`mount:${detail.worktreeId}`)
+    mountDetails.push(detail)
+  }
+  window.addEventListener(WAKE_HIBERNATED_AGENTS_WORKTREE_EVENT, onWake)
+  window.addEventListener(BACKGROUND_MOUNT_TERMINAL_WORKTREE_EVENT, onMount)
+  return {
+    events,
+    mountDetails,
+    wakeDetails,
+    stop: () => {
+      window.removeEventListener(WAKE_HIBERNATED_AGENTS_WORKTREE_EVENT, onWake)
+      window.removeEventListener(BACKGROUND_MOUNT_TERMINAL_WORKTREE_EVENT, onMount)
+    }
+  }
+}
 
 beforeEach(() => {
   sleepingRecords = {}
@@ -122,6 +164,22 @@ describe('wakeSleepingAgentsForWorktreeInBackground', () => {
     expect(takeSleepingAgentWakeRequest(passive)).toBe(true)
     expect(takeSleepingAgentWakeRequest(passive)).toBe(false)
     expect(takeSleepingAgentWakeRequest(slept)).toBe(false)
+  })
+
+  it('background-mounts a non-passive record’s own tab so it resumes in place, not in a duplicate tab', () => {
+    sleepingRecords = { k1: { worktreeId: 'wt-1', paneKey: 'tab-a:leaf-1', tabId: 'tab-a' } }
+    terminalTabsByWorktree = { 'wt-1': [{ id: 'tab-a' }] }
+    isPassiveSpy.mockReturnValue(false)
+    const rec = recordEvents()
+
+    wakeSleepingAgentsForWorktreeInBackground('wt-1')
+
+    rec.stop()
+    // The pane's own tab is mounted so its pane cold-restores the record; the wake-on-mount mark
+    // tells the resume sweep the pane owns its record, so no duplicate tab launches per open.
+    expect(rec.events).toEqual(['wake:wt-1', 'mount:wt-1'])
+    expect(rec.mountDetails[0]?.tabIds).toEqual(['tab-a'])
+    expect(hasSleepingAgentWakeRequest(sleepingRecords.k1 as never)).toBe(true)
   })
 
   it('wakes mounted panes through the real pane listener and skips their claims', () => {
