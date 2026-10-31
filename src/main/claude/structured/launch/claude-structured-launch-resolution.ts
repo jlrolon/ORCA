@@ -1,6 +1,10 @@
 import type { ClaudeAccountRecipe } from '../../../../shared/agent-session/lifecycle/agent-session-acquired-account'
 import { prepareClaudeLaunchAccount } from '../../claude-launch-account'
 import { assertStructuredAgentResolutionCurrent } from '../../../native-chat/structured-agent-command-resolution'
+import {
+  quotaApiEnvironment,
+  type NativeQuotaApiCredential
+} from '../../../native-chat/quota-fallback-native-auth'
 import { activeProviderContext } from '../../../../shared/agent-session/agent-session-provider-context'
 import { getClaudeProfileRouter } from '../../../claude-accounts/claude-profile-installed-router'
 import { requireLegacyAgentSessionAccountHome } from '../../../../shared/agent-session/lifecycle/agent-session-account-home'
@@ -118,6 +122,7 @@ export type ClaudeStructuredLaunch = {
 }
 
 export type ClaudeStructuredLaunchPartDeps = {
+  resolveQuotaApiCredential?: (sessionId: string) => Promise<NativeQuotaApiCredential | null>
   resolveLaunchArgs: () => Promise<string[]> | string[]
   resolveCommand?: ClaudeEnvDeps['resolveCommand']
   /** Explicit policy identifies the account for sign-in errors; use claudeStructuredAuthPolicyForSettings. */
@@ -263,6 +268,11 @@ export function claudeStructuredLaunchPart(
         hasTranscript: deps.hasTranscript
       })
     }
+    const quotaApi = await deps.resolveQuotaApiCredential?.(record.sessionId)
+    if (quotaApi && quotaApi.route !== 'claude-api') {
+      throw new Error('Quota API route does not match Claude')
+    }
+    const quotaEnv = quotaApi ? quotaApiEnvironment(env, quotaApi) : null
     return {
       launch: {
         pathToClaudeCodeExecutable: command,
@@ -278,7 +288,8 @@ export function claudeStructuredLaunchPart(
             ...configured.extraArgs,
             ...CLAUDE_STRUCTURED_BASE_OPTIONS.extraArgs,
             ...permission.extraArgs,
-            ...thinkingDisplayArgs
+            ...thinkingDisplayArgs,
+            ...(quotaApi ? { 'max-budget-usd': String(quotaApi.maxDebitUsd) } : {})
           },
           // Claude owns where a resumed conversation continues; the stored leaf is Orca's bookkeeping.
           ...(resumesTranscript
@@ -296,8 +307,8 @@ export function claudeStructuredLaunchPart(
           ? { forkedFromKey: agentSessionProviderHandleKey(head) }
           : {})
       },
-      env,
-      inheritedEnvToDelete: [],
+      env: quotaEnv?.env ?? env,
+      inheritedEnvToDelete: quotaEnv?.removed ?? [],
       // The agent runtime follows Orca's CLI directory on PATH so another orca cannot shadow it.
       cliRuntimeCommand: command
     }
