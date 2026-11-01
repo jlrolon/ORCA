@@ -39,6 +39,7 @@ import { MobileNativeChatLiveLine } from './transcript/MobileNativeChatLiveLine'
 import { MobileNativeChatAwaitingInputRow } from './transcript/MobileNativeChatAwaitingInputRow'
 import type { NativeChatAwaitingInput } from '../../../../src/shared/native-chat/native-chat-terminal-turn'
 import { MobileNativeChatFloatingControls } from './MobileNativeChatFloatingControls'
+import { useMobileNativeChatPreviousStops } from './transcript/use-mobile-native-chat-previous-stops'
 import type { PendingNativeChatImage } from './composer/mobile-native-chat-image-attachment'
 import {
   MobileNativeChatDraftComposer,
@@ -213,7 +214,7 @@ export function MobileNativeChatView({
     [folded, streaming, pending, imagePreviewsByMessageId]
   )
   const tail = useMobileNativeChatTailFollow({ hasItems: data.length > 0, scopeKey: sendSurfaceId })
-  const { jumpToTail, recordScrollMetrics, scrollMayLoadEarlier } = tail
+  const { jumpToTail, recordScrollMetrics, scrollMayLoadEarlier, jumpToPreviousMessage } = tail
 
   const handleSend = useCallback(
     async (...send: Parameters<typeof onSend>): Promise<boolean> => {
@@ -293,6 +294,7 @@ export function MobileNativeChatView({
   const header = mobileNativeChatListHeader(hasMore, olderPages, loadEarlier)
   // Changing text scale relays out every row, so preserve the page’s reading anchor.
   const layoutKey = `${fontScale}`
+  useMobileNativeChatPreviousStops(tail, turns, rowKeys.keyOf, layoutKey)
   const footer = mobileNativeChatListFooter(liveStatus, turns.waitingRows, renderItem)
   const emptyState = mobileNativeChatEmptyState(status, agent ?? null, error, sessionLive)
 
@@ -303,7 +305,6 @@ export function MobileNativeChatView({
   )
   // Lock only terminal-backed Send: it can answer an agent prompt, while drafting is harmless and structured sends queue.
   const promptShown = !collapsedPrompt && (ask ?? permission ?? question) != null
-  const expandedPromptOwnsSend = !structuredActivityUi && promptShown
   const promptOwnsInput = useMobileNativeChatPromptInputOwner(
     { promptShown, ask, askRequiresTerminal, permission, micActive, micProcessing },
     inputRef
@@ -344,6 +345,8 @@ export function MobileNativeChatView({
           <MobileNativeChatFloatingControls
             showJumpToTail={tail.showJumpToTail}
             onJumpToTail={jumpToTail}
+            showPreviousMessage={tail.showPreviousMessage}
+            onJumpToPrevious={jumpToPreviousMessage}
           />
         </GestureHandlerRootView>
       )}
@@ -397,7 +400,7 @@ export function MobileNativeChatView({
           onMicPressIn={onMicPressIn}
           onMicPressOut={onMicPressOut}
           disabled={lockReason !== null}
-          sendDisabled={expandedPromptOwnsSend}
+          sendDisabled={!structuredActivityUi && promptShown}
           placeholder={composerPlaceholder}
           filePaths={filePaths}
           onNeedFiles={onNeedFiles}
