@@ -49,7 +49,8 @@ export function MobileSessionCommandDock({ controller }: { controller: MobileSes
   const imagePastePending = useMobileTerminalComposerImagePaste({
     enabled: dockShown,
     fieldRefs: [liveInputRef],
-    onImagePaste: () => controller.handlePaste(),
+    onImagePaste: (mode) =>
+      controller.handlePaste(mode === 'image' ? { preferImage: true } : undefined),
     readClipboardImage: clipboardImage.read
   })
   if (!dockShown) {
