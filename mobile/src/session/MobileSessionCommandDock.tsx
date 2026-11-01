@@ -46,12 +46,10 @@ export function MobileSessionCommandDock({ controller }: { controller: MobileSes
   } = controller
   const dockShown = sessionCommandDockShown(controller)
   const clipboardImage = useMobileComposerClipboardImageReader()
-  useMobileTerminalComposerImagePaste({
+  const imagePastePending = useMobileTerminalComposerImagePaste({
     enabled: dockShown,
     fieldRefs: [liveInputRef],
-    onImagePaste: () => {
-      void controller.handlePaste()
-    },
+    onImagePaste: () => controller.handlePaste(),
     readClipboardImage: clipboardImage.read
   })
   if (!dockShown) {
@@ -104,7 +102,11 @@ export function MobileSessionCommandDock({ controller }: { controller: MobileSes
             }
           }}
           onKeyPress={handleLiveInputKeyPress}
-          onSubmitEditing={submitLiveInput}
+          onSubmitEditing={() => {
+            if (!imagePastePending) {
+              submitLiveInput()
+            }
+          }}
           placeholder={t('session.commandDock.tapToShowKeyboard', 'Tap to show keyboard')}
           accessibilityLabel={t('session.commandDock.liveInputLabel', 'Live terminal input')}
           accessibilityHint={t(
@@ -126,7 +128,7 @@ export function MobileSessionCommandDock({ controller }: { controller: MobileSes
           importantForAutofill="no"
         />
         <MobileTerminalInputActions
-          canSend={canSend}
+          canSend={canSend && !imagePastePending}
           isAttaching={isAttaching}
           dictation={dictation}
           dictationMode={dictationMode}
