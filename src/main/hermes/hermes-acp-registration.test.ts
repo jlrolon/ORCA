@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest'
 import { acpLaunchSpecFor } from '../acp/acp-launch-specs'
 import { decideAgentLaunchMode } from '../agent-launch/agent-launch-mode'
 import { structuredAgentRuntimeRegistration } from '../runtime/structured-agent-runtime-registrations'
@@ -32,6 +33,7 @@ describe('Hermes ACP registration', () => {
     })
     expect(registration?.launchCheck).toBeUndefined()
     const spec = acpLaunchSpecFor('hermes')
+    expect(spec?.env.HERMES_YOLO_MODE).toBe('0')
     expect(spec?.args({ fullAccess: false, pluginDir: '/plugin' })).toEqual(['acp'])
     expect(spec?.args({ fullAccess: true, pluginDir: '/plugin' })).toEqual(['--yolo', 'acp'])
     expect(spec?.historyCatchUp).toBeUndefined()
