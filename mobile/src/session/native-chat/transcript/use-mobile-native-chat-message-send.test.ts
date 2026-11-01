@@ -30,6 +30,7 @@ describe('useMobileNativeChatMessageSend', () => {
   let renderer: ReactTestRenderer | null = null
   let api: Send | null = null
   const acceptSend = vi.fn()
+  const discardPendingSend = vi.fn()
   const captureSendOrigin = vi.fn(() => ({ draftKey: 'k', pendingKey: 'p' }) as never)
   const clearDraftForSend = vi.fn()
   const restoreRejectedDraft = vi.fn()
@@ -73,6 +74,7 @@ describe('useMobileNativeChatMessageSend', () => {
         clearDraftForSend,
         restoreRejectedDraft,
         acceptSend,
+        discardPendingSend,
         holdUnconfirmedSend,
         onSendError
       })
@@ -91,6 +93,7 @@ describe('useMobileNativeChatMessageSend', () => {
     typeCommandWithOutcome.mockReset()
     typeCommandWithOutcome.mockResolvedValue('accepted')
     acceptSend.mockReset()
+    discardPendingSend.mockReset()
     captureSendOrigin.mockClear()
     clearDraftForSend.mockReset()
     restoreRejectedDraft.mockReset()
@@ -106,6 +109,25 @@ describe('useMobileNativeChatMessageSend', () => {
     })
     renderer = null
     api = null
+  })
+
+  it('shows a Hermes message before the terminal acknowledges it and removes it on rejection', async () => {
+    const result = Promise.withResolvers<MobileNativeChatSendOutcome>()
+    sendWithOutcome.mockReturnValue(result.promise)
+    acceptSend.mockReturnValue('pending-1')
+    mount(() => null, 'hermes')
+    let sending: Promise<MobileNativeChatSendOutcome>
+    await act(async () => {
+      sending = api!.sendWithOutcome('hello')
+      await Promise.resolve()
+    })
+    expect(acceptSend).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      result.resolve('rejected')
+      await sending
+    })
+    expect(discardPendingSend).toHaveBeenCalledWith('pending-1')
+    expect(restoreRejectedDraft).toHaveBeenCalled()
   })
 
   it('binds classification to the agent that started the send', async () => {
