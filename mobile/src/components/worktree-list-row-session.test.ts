@@ -136,4 +136,30 @@ describe('selectable sidebar session rows', () => {
       expect.objectContaining({ selectedPaneKey: null })
     )
   })
+
+  it('opens the workspace from its own accessibility control', async () => {
+    const onPress = vi.fn()
+    await act(async () => {
+      renderer = create(
+        createElement(WorktreeListRow, {
+          item: baseItem,
+          view: {},
+          isReadOnly: false,
+          now: 2_000,
+          repoColor: '#000000',
+          cardDetails: ALL_DETAILS,
+          agentActivityDisplayMode: 'compact',
+          status: 'active',
+          onPress
+        })
+      )
+    })
+    const card = findAllByHostType(renderer!.root, 'Pressable')[0]
+    expect(card.props.accessible).toBe(false)
+    const workspace = renderer!.root.find((node) => node.props.accessibilityRole === 'button')
+    await act(async () => {
+      workspace.props.onAccessibilityAction({ nativeEvent: { actionName: 'activate' } })
+    })
+    expect(onPress).toHaveBeenCalledWith(baseItem)
+  })
 })
