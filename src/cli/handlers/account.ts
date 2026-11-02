@@ -7,7 +7,6 @@ import type { CommandHandler, HandlerContext } from '../dispatch'
 import { printResult } from '../format'
 import { RuntimeClientError } from '../runtime-client'
 import { stripElectronRunAsNode } from '../runtime/orca-app-executable'
-import { rejectRemoteSelectionFlags } from '../remote-selection-flag-rejection'
 import { buildWslExecArgs, buildWslLoginShellCommand } from '../../shared/wsl-login-shell-command'
 import { quotePosixShell } from '../../shared/shell-argument-quoting'
 import { isWindowsFnmDefaultAliasDir } from '../../shared/fnm-default-alias-dirs'
@@ -22,11 +21,6 @@ import {
   WINDOWS_BATCH_UNSAFE_CHARACTERS_LABEL
 } from '../../shared/windows-batch-spawn'
 import { stdioForWindowsInteractiveChild } from '../../shared/windows-console-input'
-import {
-  ACCOUNT_IMPORT_RUNTIME_CAPABILITY,
-  CLAUDE_SIGN_IN_RUNTIME_CAPABILITY
-} from '../../shared/account-runtime-capabilities'
-import type { RuntimeStatus } from '../../shared/runtime-types'
 import type {
   ClaudeAccountSignIn,
   ClaudeRateLimitAccountsState,
@@ -38,11 +32,17 @@ import {
   withInteractiveLoginCleanup
 } from './interactive-login-interruption'
 import { getWslAccountTarget } from './account-wsl-location'
+import {
+  assertAccountImportSupported,
+  rejectAccountRemoteSelectionFlags
+} from './account-command-guards'
 import { addDataAccount, listDataAccounts, mutateDataAccount } from './data-account-commands'
 import { formatAccountsBlock, formatDataAccounts } from './account-list-format'
 import { setClaudeAuthProxy } from './account-auth-proxy'
 import { resolveOpenCodeLoginCommand } from './opencode-account-login-command'
 import { setClaudeAutoSwitch } from './account-auto-switch'
+import { printClaudeAccountMoves } from './account-moves'
+import { setClaudeAccountPool } from './account-pool'
 import { setClaudeSessionMover } from './account-session-mover'
 
 type AccountsListSnapshot = {
@@ -231,28 +231,6 @@ async function addCodexAccount({ client, cwd, json }: HandlerContext): Promise<v
   printResult(result, json, (state) => formatAccountsBlock('Codex', state))
 }
 
-function rejectAccountRemoteSelectionFlags(ctx: HandlerContext, command: string): void {
-  rejectRemoteSelectionFlags(
-    ctx.flags,
-    `\`${command}\`. Run it on the host whose accounts you want to manage.`
-  )
-}
-
-async function assertAccountImportSupported(
-  { client }: HandlerContext,
-  agent: 'claude' | 'codex'
-): Promise<void> {
-  const status = await client.call<RuntimeStatus>('status.get')
-  const capability =
-    agent === 'claude' ? CLAUDE_SIGN_IN_RUNTIME_CAPABILITY : ACCOUNT_IMPORT_RUNTIME_CAPABILITY
-  if (!status.result.capabilities?.includes(capability)) {
-    throw new RuntimeClientError(
-      'incompatible_runtime',
-      'The running Orca runtime is too old to add accounts from the CLI. Update or restart Orca and try again.'
-    )
-  }
-}
-
 export const ACCOUNT_HANDLERS: Record<string, CommandHandler> = {
   'account add': async (ctx) => {
     const agentFlag = ctx.flags.get('agent')
@@ -309,7 +287,9 @@ export const ACCOUNT_HANDLERS: Record<string, CommandHandler> = {
     rejectAccountRemoteSelectionFlags(ctx, 'orca account rm')
     await mutateDataAccount(ctx, 'remove')
   },
-  'account auto-switch': setClaudeAutoSwitch,
   'account auth-proxy': setClaudeAuthProxy,
+  'account auto-switch': setClaudeAutoSwitch,
+  'account moves': printClaudeAccountMoves,
+  'account pool': setClaudeAccountPool,
   'account session-mover': setClaudeSessionMover
 }
