@@ -43,6 +43,7 @@ import { formatAccountsBlock, formatDataAccounts } from './account-list-format'
 import { setClaudeAuthProxy } from './account-auth-proxy'
 import { resolveOpenCodeLoginCommand } from './opencode-account-login-command'
 import { setClaudeAutoSwitch } from './account-auto-switch'
+import { setClaudeSessionMover } from './account-session-mover'
 
 type AccountsListSnapshot = {
   opencode?: ManagedDataAccountsState
@@ -309,5 +310,6 @@ export const ACCOUNT_HANDLERS: Record<string, CommandHandler> = {
     await mutateDataAccount(ctx, 'remove')
   },
   'account auto-switch': setClaudeAutoSwitch,
-  'account auth-proxy': setClaudeAuthProxy
+  'account auth-proxy': setClaudeAuthProxy,
+  'account session-mover': setClaudeSessionMover
 }

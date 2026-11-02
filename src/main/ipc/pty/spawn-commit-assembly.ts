@@ -1,5 +1,5 @@
-import type { ClaudeRuntimeAuthPreparation } from '../../claude-accounts/runtime-auth-service'
 import { readTerminalStartFailure } from '../../../shared/terminal-start-failure'
+import type { ClaudeRuntimeAuthPreparation } from '../../claude-accounts/runtime-auth-service'
 import type { PtySpawnSizeSeed } from './spawn-options-assembly'
 import { isValidTerminalTabId } from '../../../shared/terminal-tab-id'
 import type { AgentSessionClaimedSpawnResult } from '../../../shared/agent-session/agent-session-host-authority'
@@ -51,6 +51,7 @@ export type PtySpawnCommitState = {
     | 'resumeProviderSession'
     | 'onResumeOutcome'
     | 'telemetry'
+    | 'claudeAccountId'
   >
   result: PtySpawnResult
   provider: IPtyProvider
