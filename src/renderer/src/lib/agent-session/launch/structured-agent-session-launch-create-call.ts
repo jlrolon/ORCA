@@ -1,3 +1,4 @@
+import { SETUP_LINKED_CREATE_BUDGET_MS } from '@/components/native-chat/structured-agent-session-send-runtime'
 import { AGENT_SESSION_SEND_SELECTION_RUNTIME_CAPABILITY } from '../../../../../shared/agent-session/agent-session-create-capabilities'
 import type {
   AgentSessionAttachResult,
@@ -167,7 +168,8 @@ export async function launchStructuredAgentSession(
     result = await callStructuredAgentSession<AgentSessionMutationResult<AgentSessionAttachResult>>(
       intent.target,
       'agentSession.create',
-      params
+      params,
+      ...(params.afterWorktreeSetup ? [{ timeoutMs: SETUP_LINKED_CREATE_BUDGET_MS }] : [])
     )
   } catch (error) {
     const code = definitiveStructuredAgentSessionCreateErrorCode(error)
@@ -191,6 +193,7 @@ export async function launchStructuredAgentSession(
       isAgentSessionCreateAdmissionRefusal(refusal)
     // Attempt proof cannot settle an earlier create whose reply was lost.
     if (
+      code !== 'agent_session_setup_not_completed' &&
       !attemptRefusedBeforeCommit &&
       !isDefinitiveAgentSessionCreateRefusal(code) &&
       ownerVerdict !== 'exited'

@@ -1,3 +1,6 @@
+import { resolveRuntimeMethodTimeoutMs } from './runtime-request-timeout'
+import { DEFAULT_WAIT_TIMEOUT_SECONDS } from '../../shared/setup-agent-sequencing'
+import { withCliAgentLaunchRecovery } from '../agent-launch-recovery'
 import { createServer, type Server } from 'node:net'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -57,13 +60,33 @@ function expectPromptRetryBlockedJson(error: unknown, requestId: string): void {
 }
 
 describe('RuntimeClient orchestration recovery identity', () => {
-  it('rejects a worker-start timeout whose client grace would overflow timers', () => {
-    const client = new RuntimeClient(undefined, 60_000, null, null, 'orca')
-    const resolve = (
-      client as unknown as {
-        resolveMethodTimeoutMs: (method: string, params?: unknown) => number
+  it('keeps the setup failure and its existing workspace recovery action', async () => {
+    const error = new RuntimeRpcFailureError({
+      id: 'setup',
+      ok: false,
+      runtimeId: 'host',
+      error: {
+        code: 'agent_launch_setup_not_completed',
+        message:
+          'Setup failed, so Claude was not started. Fix setup, then start Claude in this workspace.'
       }
-    ).resolveMethodTimeoutMs.bind(client)
+    })
+    await expect(
+      withCliAgentLaunchRecovery(Promise.reject(error), { operationId: 'launch', params: {} })
+    ).rejects.toBe(error)
+  })
+
+  it('keeps the idle timeout for a local workspace launch, whose host keepalives refresh it', () => {
+    const launch = { agent: 'codex', target: { kind: 'create-worktree', create: {} } }
+    expect(resolveRuntimeMethodTimeoutMs('agent.launch', launch, 60_000)).toBe(60_000)
+    expect(resolveRuntimeMethodTimeoutMs('agent.launch', launch, 60_000, true)).toBe(
+      DEFAULT_WAIT_TIMEOUT_SECONDS * 1000 + 10_000
+    )
+  })
+
+  it('rejects a worker-start timeout whose client grace would overflow timers', () => {
+    const resolve = (method: string, params?: unknown): number =>
+      resolveRuntimeMethodTimeoutMs(method, params, 60_000)
     const maxValid = MAX_TIMER_DELAY_MS - ORCHESTRATION_WORKER_START_CLIENT_GRACE_MS
     expect(resolve('orchestration.workerStart', { timeoutMs: maxValid })).toBe(MAX_TIMER_DELAY_MS)
     expect(() => resolve('orchestration.workerStart', { timeoutMs: maxValid + 1 })).toThrow(
