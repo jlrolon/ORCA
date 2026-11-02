@@ -168,7 +168,8 @@ export function createProviderAccountServices(
         id: account.id,
         managedAuthRuntime: account.managedAuthRuntime,
         wslDistro: account.wslDistro,
-        wslLinuxAuthPath: account.wslLinuxAuthPath
+        wslLinuxAuthPath: account.wslLinuxAuthPath,
+        recentAt: account.lastAuthenticatedAt
       }))
   })
   // The selected host account stays out of the inactive cache so a live statusline still lands on state.claude.
@@ -188,6 +189,7 @@ export function createProviderAccountServices(
       managedAuthRuntime: account.managedAuthRuntime,
       wslDistro: account.wslDistro,
       wslLinuxAuthPath: account.wslLinuxAuthPath,
+      recentAt: account.lastAuthenticatedAt,
       ...(runsOnSystemDefault ? { runsOnSystemDefault: true as const } : {})
     }
   })

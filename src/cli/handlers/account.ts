@@ -42,6 +42,7 @@ import { addDataAccount, listDataAccounts, mutateDataAccount } from './data-acco
 import { formatAccountsBlock, formatDataAccounts } from './account-list-format'
 import { resolveOpenCodeLoginCommand } from './opencode-account-login-command'
 import { setClaudeAutoSwitch } from './account-auto-switch'
+import { setClaudeAccountTokenRefresh } from './account-token-refresh'
 
 type AccountsListSnapshot = {
   opencode?: ManagedDataAccountsState
@@ -307,5 +308,6 @@ export const ACCOUNT_HANDLERS: Record<string, CommandHandler> = {
     rejectAccountRemoteSelectionFlags(ctx, 'orca account rm')
     await mutateDataAccount(ctx, 'remove')
   },
-  'account auto-switch': setClaudeAutoSwitch
+  'account auto-switch': setClaudeAutoSwitch,
+  'account token-refresh': setClaudeAccountTokenRefresh
 }

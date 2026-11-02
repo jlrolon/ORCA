@@ -1,3 +1,8 @@
+import type {
+  ClaudeTokenRefreshNowInput,
+  ClaudeTokenRefreshNowResult
+} from '../claude-accounts/claude-token-refresh-now'
+import { refreshOneClaudeAccountToken } from '../claude-accounts/claude-token-refresh-now'
 import type { RuntimeAccountController } from './runtime-account-controller'
 import type { RuntimeAiVaultCommands } from './runtime-ai-vault-commands'
 import type { RuntimeBrowserDriverController } from './runtime-browser-driver-controller'
@@ -57,6 +62,10 @@ export type RuntimeServiceCommandSurface = {
   refreshAccountsForMobileSubscriber: RuntimeAccountController['refreshForMobileSubscriber']
   selectClaudeAccount: RuntimeAccountController['selectClaude']
   setClaudeAutoSwitch: RuntimeAccountController['setClaudeAutoSwitch']
+  setClaudeAccountTokenRefresh: RuntimeAccountController['setClaudeAccountTokenRefresh']
+  refreshClaudeAccountTokenNow: (
+    input: ClaudeTokenRefreshNowInput
+  ) => Promise<ClaudeTokenRefreshNowResult>
   selectCodexAccount: RuntimeAccountController['selectCodex']
   selectCodexAccountForTarget: RuntimeAccountController['selectCodexForTarget']
   consumeCodexRateLimitResetCredit: RuntimeAccountController['consumeCodexResetCredit']
@@ -172,6 +181,9 @@ export function installRuntimeServiceCommandSurface(
     refreshAccountsForMobileSubscriber: accounts.refreshForMobileSubscriber.bind(accounts),
     selectClaudeAccount: accounts.selectClaude.bind(accounts),
     setClaudeAutoSwitch: accounts.setClaudeAutoSwitch.bind(accounts),
+    setClaudeAccountTokenRefresh: accounts.setClaudeAccountTokenRefresh.bind(accounts),
+    refreshClaudeAccountTokenNow: (input) =>
+      refreshOneClaudeAccountToken(accounts.getSnapshot().claude.accounts, input),
     selectCodexAccount: accounts.selectCodex.bind(accounts),
     selectCodexAccountForTarget: accounts.selectCodexForTarget.bind(accounts),
     consumeCodexRateLimitResetCredit: accounts.consumeCodexResetCredit.bind(accounts),
