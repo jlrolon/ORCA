@@ -1,6 +1,12 @@
+import { terminalPendingReason } from '../tab-bar/new-tab-agent-menu-model'
 import { memo, useId, useRef, useState, type ComponentProps, type PointerEvent } from 'react'
 import { Input } from '@/components/ui/input'
-import { DropdownMenuItem, DropdownMenuShortcut } from '@/components/ui/dropdown-menu'
+import {
+  DropdownMenuItem,
+  DropdownMenuShortcut,
+  useCloseDropdownMenu
+} from '@/components/ui/dropdown-menu'
+import { keepLaunchItemHighlight, LAUNCH_ROW_ATTRIBUTE } from './agent-launch-row'
 import { AgentIcon } from '@/lib/agent-catalog'
 import { translate } from '@/i18n/i18n'
 import { useUiLanguageRevision } from '@/i18n/use-ui-language-revision'
@@ -32,8 +38,12 @@ export function pickerLaunchRow(
 type Launch = (row: NewTabAgentMenuRow, draft?: AgentPickerDraft, entry?: AgentPickerEntry) => void
 
 function keepSetupFocus(event: PointerEvent<HTMLDivElement>) {
-  // Radix row hover must not steal focus from the row's portaled setup or its nested controls.
-  if (event.currentTarget.querySelector('[data-slot="popover-trigger"][aria-expanded="true"]')) {
+  // Radix row hover must not steal focus from the row's portaled setup or the controls beside it.
+  if (
+    event.currentTarget.parentElement?.querySelector(
+      '[data-slot="popover-trigger"][aria-expanded="true"]'
+    )
+  ) {
     event.preventDefault()
   }
 }
@@ -44,10 +54,13 @@ export function AgentLaunchPickerMenu({
   entries,
   hideSearch,
   onSelectAgent,
-  shortcutLabels
+  shortcutLabels,
+  terminalPending
 }: {
   shortcutLabels?: ReadonlyMap<AgentPickerEntry['agent'], string>
   disabled?: boolean
+  /** The host is still connecting, so terminal launches wait; chat launches do not. */
+  terminalPending?: boolean
   runLaunch: Launch
   entries: AgentPickerEntry[]
   hideSearch?: boolean
@@ -101,6 +114,7 @@ export function AgentLaunchPickerMenu({
           initialEffort={setup.choices.options?.effort}
           onSelectAgent={onSelectAgent}
           disabled={disabled}
+          terminalPending={terminalPending}
           runLaunch={runLaunch}
         />
       ))}
@@ -111,6 +125,7 @@ export function AgentLaunchPickerMenu({
           openSetup={openSetup}
           onSetupOpenChange={setOpenSetup}
           disabled={disabled}
+          terminalPending={terminalPending}
           runLaunch={runLaunch}
           onSelectAgent={onSelectAgent}
           shortcut={shortcutLabels?.get(entry.agent)}
@@ -148,6 +163,7 @@ const AgentPickerMenuRow = memo(function AgentPickerMenuRow({
   initialModel,
   initialEffort,
   disabled,
+  terminalPending,
   runLaunch,
   shortcut,
   onSelectAgent
@@ -159,6 +175,7 @@ const AgentPickerMenuRow = memo(function AgentPickerMenuRow({
   initialModel?: string
   initialEffort?: string
   disabled?: boolean
+  terminalPending?: boolean
   runLaunch: Launch
   shortcut?: string
   onSelectAgent?: (agent: AgentPickerEntry['agent']) => void
@@ -176,8 +193,37 @@ const AgentPickerMenuRow = memo(function AgentPickerMenuRow({
     : undefined
   const setupId = useId()
   const item = useRef<HTMLDivElement>(null)
-  const configured = useRef<AgentPickerDraft | undefined>(undefined)
+  const closeMenu = useCloseDropdownMenu()
   const unavailable = entry.rows.find((row) => row.kind === 'chat-unavailable')
+  const pendingReason = (surface: AgentPickerSurface) =>
+    terminalPendingReason(terminalPending, pickerLaunchRow(entry, surface))
+  const defaultUnavailable = pendingReason(entry.defaultSurface)
+  const launchDisabled = disabled || !entry.surfaces.length
+  // One reason per row: why its primary action can't run now.
+  const reason =
+    defaultUnavailable ??
+    (unavailable?.kind === 'chat-unavailable' && !entry.surfaces.includes('chat')
+      ? chatUnavailableLabel(unavailable.reason)
+      : null)
+  const reasonId = `${setupId}-reason`
+  // The row's own launch and a launch configured in its setup share this guarded path.
+  const launch = (draft: AgentPickerDraft | undefined): boolean => {
+    const surface = draft?.surface ?? entry.defaultSurface
+    if (pendingReason(surface)) {
+      return false
+    }
+    const row = draft
+      ? pickerLaunchRow(entry, surface)
+      : (entry.rows.find((row) =>
+          surface === 'chat' ? row.kind === 'chat' : row.kind === 'terminal' || row.kind === 'cli'
+        ) ?? pickerLaunchRow(entry, surface))
+    if (draft) {
+      runLaunch(row, draft, entry)
+    } else {
+      runLaunch(row, undefined)
+    }
+    return true
+  }
   return (
     <AgentLaunchSetupButton
       entry={entry}
@@ -185,6 +231,7 @@ const AgentPickerMenuRow = memo(function AgentPickerMenuRow({
       open={openSetup === setupId}
       replacedByAnotherSetup={openSetup !== null && openSetup !== setupId}
       disabled={disabled}
+      terminalBlocked={terminalPending}
       onOpenChange={(next) => {
         onSetupOpenChange(next ? setupId : null)
         if (next) {
@@ -192,50 +239,55 @@ const AgentPickerMenuRow = memo(function AgentPickerMenuRow({
         }
       }}
       onUse={(draft) => {
-        configured.current = draft
-        item.current?.click()
+        if (launch(draft)) {
+          closeMenu()
+        }
       }}
       renderAnchor={(trigger) => (
-        <DropdownMenuItem
-          ref={item}
-          variant="launch"
-          disabled={disabled || !entry.surfaces.length}
-          onSelect={() => {
-            const draft = configured.current ?? initial
-            configured.current = undefined
-            const surface = draft?.surface ?? entry.defaultSurface
-            const row = draft
-              ? pickerLaunchRow(entry, surface)
-              : (entry.rows.find((row) =>
-                  surface === 'chat'
-                    ? row.kind === 'chat'
-                    : row.kind === 'terminal' || row.kind === 'cli'
-                ) ?? pickerLaunchRow(entry, surface))
-            if (draft) {
-              runLaunch(row, draft, entry)
-            } else {
-              runLaunch(row, undefined)
-            }
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'ArrowRight') {
-              event.preventDefault()
-              item.current?.querySelector<HTMLButtonElement>('button')?.focus()
-            }
-          }}
-          onPointerMove={keepSetupFocus}
-          onPointerLeave={keepSetupFocus}
+        <div
+          {...LAUNCH_ROW_ATTRIBUTE}
+          className="flex items-center rounded-[7px] pr-2 has-[[data-highlighted]]:bg-black/8 dark:has-[[data-highlighted]]:bg-white/14"
         >
-          <AgentIcon agent={entry.agent} size={14} />
-          <span className="min-w-0 flex-1 truncate">{label}</span>
-          {shortcut ? <DropdownMenuShortcut>{shortcut}</DropdownMenuShortcut> : null}
-          {unavailable?.kind === 'chat-unavailable' && !entry.surfaces.includes('chat') ? (
-            <span className="text-xs text-muted-foreground">
-              {chatUnavailableLabel(unavailable.reason)}
-            </span>
-          ) : null}
+          <DropdownMenuItem
+            ref={item}
+            variant="launch-row"
+            className="min-w-0 flex-1"
+            disabled={launchDisabled}
+            // A waiting launch stays focusable so arrow keys still reach it and Configure.
+            aria-disabled={launchDisabled || !!defaultUnavailable || undefined}
+            aria-describedby={reason ? reasonId : undefined}
+            onSelect={(event) => {
+              if (!launch(initial)) {
+                event.preventDefault()
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowRight') {
+                event.preventDefault()
+                item.current?.parentElement?.querySelector<HTMLButtonElement>('button')?.focus()
+              }
+            }}
+            onPointerMove={keepSetupFocus}
+            onPointerLeave={(event) => {
+              keepSetupFocus(event)
+              keepLaunchItemHighlight(event)
+            }}
+          >
+            <AgentIcon agent={entry.agent} size={14} />
+            {/* Why flex-auto: the name keeps its width and the reason truncates first. */}
+            <span className="min-w-0 flex-auto truncate">{label}</span>
+            {shortcut ? <DropdownMenuShortcut>{shortcut}</DropdownMenuShortcut> : null}
+            {reason ? (
+              <span
+                id={reasonId}
+                className="min-w-0 shrink-[4] truncate text-xs text-muted-foreground"
+              >
+                {reason}
+              </span>
+            ) : null}
+          </DropdownMenuItem>
           {trigger}
-        </DropdownMenuItem>
+        </div>
       )}
     />
   )

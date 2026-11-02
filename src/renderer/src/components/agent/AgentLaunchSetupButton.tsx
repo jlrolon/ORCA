@@ -7,6 +7,7 @@ import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/compon
 import { translate } from '@/i18n/i18n'
 import { AgentLaunchSetupPanel } from './AgentLaunchSetupPanel'
 import type { AgentPickerDraft, AgentPickerEntry } from '../../../../shared/agent-launch-picker'
+import { returnToLaunchItem } from './agent-launch-row'
 
 // The menu and its popovers unmount on dismissal; authored setups live for this app session.
 const sessionDrafts = new Map<string, AgentPickerDraft>()
@@ -16,16 +17,8 @@ function setupKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     event.preventDefault()
     event.stopPropagation()
     event.currentTarget.click()
-  } else if (['ArrowLeft', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
-    const row = event.currentTarget.closest<HTMLElement>('[role="menuitem"]')
-    if (row) {
-      event.preventDefault()
-      event.stopPropagation()
-      row.focus()
-      if (event.key !== 'ArrowLeft') {
-        row.dispatchEvent(new window.KeyboardEvent('keydown', { key: event.key, bubbles: true }))
-      }
-    }
+  } else {
+    returnToLaunchItem(event)
   }
 }
 
@@ -34,6 +27,7 @@ export function AgentLaunchSetupButton({
   initial,
   renderAnchor,
   disabled,
+  terminalBlocked,
   open: controlledOpen,
   replacedByAnotherSetup = false,
   onOpenChange,
@@ -43,6 +37,8 @@ export function AgentLaunchSetupButton({
   initial?: AgentPickerDraft
   renderAnchor?: (trigger: ReactElement) => ReactElement
   disabled?: boolean
+  /** The host is still connecting: the terminal launch stays shown but waits. */
+  terminalBlocked?: boolean
   open?: boolean
   replacedByAnotherSetup?: boolean
   onOpenChange?: (open: boolean) => void
@@ -161,6 +157,7 @@ export function AgentLaunchSetupButton({
             entry={entry}
             initial={sessionDrafts.get(draftKey) ?? initial}
             disabled={disabled}
+            terminalBlocked={terminalBlocked}
             onDraftChange={(draft) => sessionDrafts.set(draftKey, draft)}
             onUse={(draft) => {
               onUse(draft)

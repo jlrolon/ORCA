@@ -37,6 +37,7 @@ vi.mock('@/store', async () => {
     terminalLayoutsByTabId: {},
     runtimePaneTitlesByTabId: {},
     ptyIdsByTabId: {},
+    getKnownWorktreeById: () => undefined,
     openSettingsPage: vi.fn(),
     openSettingsTarget: vi.fn()
   }
@@ -106,9 +107,10 @@ function reopenMenu(): void {
   })
 }
 
-function choiceModel(kind: 'cli' | 'chat'): menuRows.NewTabAgentMenuModel {
+function choiceModel(kind: 'cli' | 'chat', terminalPending?: true): menuRows.NewTabAgentMenuModel {
   return {
     state: 'settled',
+    ...(terminalPending ? { terminalPending } : {}),
     rows: [
       kind === 'cli'
         ? { kind, agent: 'codex', chat: true, executionHostId: 'runtime:server' }
@@ -246,7 +248,7 @@ it.each(['cli', 'chat'] as const)(
 )
 
 it.each(['cli', 'chat'] as const)(
-  'keeps %s drag release exact-once, expires unused release, and respects disabled',
+  'keeps %s drag release exact-once and respects disabled',
   async (kind) => {
     for (const alternate of [true, false]) {
       const { row, button } = renderChoice(kind, false, false)
@@ -257,24 +259,16 @@ it.each(['cli', 'chat'] as const)(
       )
       cleanup()
     }
-    for (const deferred of [false, true]) {
+    // As on any menu item, a press that starts on the row and is released on the button chooses
+    // the button, once.
+    {
       const { row, button } = renderChoice(kind)
       hover(button)
       act(() => {
         fireEvent.pointerDown(row, { pointerType: 'mouse' })
         fireEvent.pointerUp(button, { pointerType: 'mouse' })
-        expect(launchMock).not.toHaveBeenCalled()
-        if (!deferred) {
-          row.click()
-        }
       })
-      if (deferred) {
-        await act(async () => {
-          await Promise.resolve()
-          row.click()
-        })
-      }
-      expectLaunch(kind === 'cli' ? 'terminal' : 'chat')
+      expectLaunch(kind === 'cli' ? 'chat' : 'terminal')
       cleanup()
     }
     const { row, button } = renderChoice(kind, true)
@@ -288,6 +282,71 @@ it.each(['cli', 'chat'] as const)(
     expect(screen.queryByRole('menu')).not.toBeNull()
   }
 )
+
+it.each([1, 10])(
+  'leaves no window listeners from cancelled or unmounted presses on the row button (x%i)',
+  (scale) => {
+    const added = vi.spyOn(window, 'addEventListener')
+    const removed = vi.spyOn(window, 'removeEventListener')
+    const pressCalls = (spy: typeof added) =>
+      spy.mock.calls.filter(([type]) => type === 'pointerup' || type === 'pointercancel')
+    const live = () =>
+      pressCalls(added).filter(
+        ([type, listener]) =>
+          !pressCalls(removed).some(([other, gone]) => other === type && gone === listener)
+      )
+    let { button } = renderChoice('cli')
+    for (let press = 0; press < 5 * scale; press += 1) {
+      fireEvent.pointerDown(button, { pointerType: 'touch' })
+      fireEvent.pointerCancel(button, { pointerType: 'touch' })
+    }
+    expect(pressCalls(added)).toHaveLength(2 * 5 * scale)
+    expect(live()).toEqual([])
+    // Cancelled presses left nothing behind, so a drag released on the button still chooses it.
+    fireEvent.pointerUp(button, { pointerType: 'mouse' })
+    expectLaunch('chat')
+    cleanup()
+    ;({ button } = renderChoice('cli'))
+    fireEvent.pointerDown(button, { pointerType: 'mouse' })
+    expect(live()).toHaveLength(2)
+    cleanup()
+    expect(live()).toEqual([])
+    // A whole press on the button starts its surface once.
+    ;({ button } = renderChoice('cli'))
+    fireEvent.pointerDown(button, { pointerType: 'mouse' })
+    fireEvent.pointerUp(button, { pointerType: 'mouse' })
+    fireEvent.click(button)
+    expectLaunch('chat')
+    expect(live()).toEqual([])
+  }
+)
+
+it('keeps the chat beside a waiting terminal row usable while its host connects', () => {
+  vi.spyOn(menuRows, 'useNewTabAgentMenuRows').mockReturnValue(choiceModel('cli', true))
+  launchMock.mockReset().mockReturnValue({ surface: { kind: 'host-published' } })
+  render(
+    <QuickLaunchAgentMenuItems
+      worktreeId={WORKTREE_ID}
+      groupId="group-1"
+      onFocusTerminal={vi.fn()}
+    />
+  )
+  const row = screen.getByRole('menuitem', { name: 'Launch Codex in a new terminal' })
+  expect(row.getAttribute('aria-disabled')).toBe('true')
+  expect(document.getElementById(row.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+    'Connecting…'
+  )
+  act(() => row.focus())
+  fireEvent.keyDown(row, { key: 'Enter' })
+  act(() => row.click())
+  expect(launchMock).not.toHaveBeenCalled()
+  fireEvent.keyDown(row, { key: 'ArrowRight' })
+  const chat = screen.getByRole('button', { name: 'Start a chat with Codex' })
+  expect(document.activeElement).toBe(chat)
+  expect(chat.closest('[aria-disabled="true"], [disabled]')).toBeNull()
+  fireEvent.keyDown(chat, { key: 'Enter' })
+  expectLaunch('chat')
+})
 
 it.each(['chat', 'cli'] as const)(
   'preserves notes inputs and failure outcomes on the %s row chat action',
@@ -341,9 +400,7 @@ it.each(['chat', 'cli'] as const)(
           delivered: outcome === 'delivered'
         })
       }
-      expect(toastError).toHaveBeenCalledTimes(
-        outcome === 'unconfirmed' || outcome === 'no-command' ? 1 : 0
-      )
+      expect(toastError).toHaveBeenCalledTimes(outcome === 'unconfirmed' ? 1 : 0)
       if (outcome === 'unconfirmed') {
         expect(toastError).toHaveBeenCalledWith(expect.stringContaining("Couldn't send to"), {
           description: expect.stringContaining(
