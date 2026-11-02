@@ -23,8 +23,11 @@ import { refreshLocalStructuredSessionWorktreeTabs } from '@/runtime/local-struc
 import { STRUCTURED_AGENT_SESSION_REVEAL_RUNTIME_CAPABILITY } from '../../../shared/agent-session/structured-agent-session-surface-capabilities'
 import { isRuntimeCompatBlockError } from '@/runtime/runtime-protocol-compat'
 import { executionHostIdForStructuredTarget } from '@/runtime/structured-agent-session-owner'
-
-const STRUCTURED_SESSION_RESTORE_TIMEOUT_MS = 5_000
+import { retireMovedSessionPlacement } from './retire-moved-structured-session-placement'
+import {
+  STRUCTURED_SESSION_RESTORE_TIMEOUT_MS,
+  withStructuredSessionRestoreTimeout
+} from './structured-session-restore-timeout'
 
 /** Keep distinct remedies: retry unreachable hosts, stop on a confirmed missing record, or update incompatible hosts/adapters. Failure to answer never proves a chat is gone. */
 export type StructuredSessionRevealOutcome =
@@ -35,7 +38,10 @@ export type StructuredSessionRevealOutcome =
   | 'unreachable'
 
 export type StructuredSessionOpenAdapterDeps = {
-  activate: typeof activateStructuredAgentSessionById
+  /** May wait for the chat's workspace listing before showing it. */
+  activate: (
+    ...args: Parameters<typeof activateStructuredAgentSessionById>
+  ) => boolean | Promise<boolean>
   tabs: (
     target: { sessionId: string; worktreeId: string },
     owner: RuntimeClientTarget
@@ -48,7 +54,7 @@ export type StructuredSessionOpenAdapterDeps = {
   }) => Promise<StructuredSessionRevealOutcome>
 }
 
-const defaultDeps: StructuredSessionOpenAdapterDeps = {
+export const desktopStructuredSessionOpenDeps: StructuredSessionOpenAdapterDeps = {
   activate: activateStructuredAgentSessionById,
   tabs: (target, owner) => {
     const tab = findStructuredAgentSessionTab(useAppStore.getState().unifiedTabsByWorktree, {
@@ -84,6 +90,8 @@ type DesktopInteractionOptions = {
   deps?: StructuredSessionOpenAdapterDeps
   locate?: StructuredSessionOpenDeps['locate']
   initialize?: () => boolean
+  /** False once the user navigated during the open: it then ends without moving them. */
+  current?: () => boolean
   present: (result: StructuredSessionOpenResult) => void
   onError?: () => void
 }
@@ -124,7 +132,13 @@ export async function openDesktopStructuredSessionInteraction(
   const execute = async (): Promise<StructuredSessionOpenResult> => {
     initialized = options.initialize?.() !== false
     return initialized
-      ? executeDesktopStructuredSession(source, owner, options.deps ?? defaultDeps, options.locate)
+      ? executeDesktopStructuredSession(
+          source,
+          owner,
+          options.deps ?? desktopStructuredSessionOpenDeps,
+          options.locate,
+          options.current
+        )
       : {
           kind: 'failed' as const,
           failure: { reason: 'unreachable' as const, beforeEffects: true }
@@ -134,6 +148,14 @@ export async function openDesktopStructuredSessionInteraction(
     .then(
       (result) => {
         if (initialized) {
+          if (result.kind === 'opened' && seedWorkspace) {
+            retireMovedSessionPlacement(
+              result.target.sessionId,
+              seedWorkspace,
+              result.target.worktreeId,
+              owner
+            )
+          }
           options.present(result)
         }
         return result
@@ -171,9 +193,11 @@ async function executeDesktopStructuredSession(
   source: StructuredSessionOpenSource,
   owner: RuntimeClientTarget,
   deps: StructuredSessionOpenAdapterDeps,
-  locate?: StructuredSessionOpenDeps['locate']
+  locate?: StructuredSessionOpenDeps['locate'],
+  current?: () => boolean
 ): Promise<StructuredSessionOpenResult> {
   return openStructuredAgentSession(source, {
+    current,
     locate:
       locate ??
       (async (address, messageIds) => {
@@ -256,6 +280,7 @@ export async function revealStructuredSession(target: {
     return 'unreachable'
   }
   if (result?.ok === true) {
+    retireMovedSessionPlacement(result.sessionId, target.worktreeId, result.workspaceId, host)
     return { sessionId: result.sessionId, worktreeId: result.workspaceId, agent: result.agent }
   }
   // Distinguish a missing record from an existing record the host cannot open; only the first means gone.
@@ -294,23 +319,4 @@ async function refreshStructuredSessionTabs(
       { timeoutMs: STRUCTURED_SESSION_RESTORE_TIMEOUT_MS }
     )
   )
-}
-
-async function withStructuredSessionRestoreTimeout<T>(promise: Promise<T>): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error('structured_session_restore_timeout')),
-          STRUCTURED_SESSION_RESTORE_TIMEOUT_MS
-        )
-      })
-    ])
-  } finally {
-    if (timer) {
-      clearTimeout(timer)
-    }
-  }
 }
