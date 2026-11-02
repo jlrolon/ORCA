@@ -282,9 +282,7 @@ export function ClaudeSwitcherForOwner({
         heading={translate('auto.components.status.bar.StatusBar.d450654fa2', 'Claude Account')}
         badge={
           accounts.pool === 'on' ? (
-            <Badge variant="hostContext" className="text-3xs">
-              {translate('accounts.claude.pool.badge', 'Pool')}
-            </Badge>
+            <Badge variant="hostContext">{translate('accounts.claude.pool.badge', 'Pool')}</Badge>
           ) : undefined
         }
       >
