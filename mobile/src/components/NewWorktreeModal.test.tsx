@@ -61,6 +61,7 @@ import {
   type ExecutionHostId
 } from '../../../src/shared/execution-host'
 import { MOBILE_DESKTOP_RELAY_RUNTIME_CAPABILITY } from '../../../src/shared/mobile-desktop-relay-contract'
+import { PROJECT_DEFAULT_AGENT_RUNTIME_CAPABILITY } from '../../../src/shared/agent-launch/contracts/agent-launch-runtime-capability'
 import { MOBILE_RELAY_HOSTS_LIST_METHOD } from '../../../src/shared/mobile-relay-hosts-contract'
 import { NewWorktreeModal } from './NewWorktreeModal'
 import { NewWorktreeModalController } from './NewWorktreeModalController'
@@ -404,7 +405,10 @@ describe('NewWorktreeModal project targets', () => {
         return replied({ repos: listed })
       }
       if (method === 'status.get') {
-        return replied({ hostPlatform })
+        return replied({ hostPlatform, capabilities: [PROJECT_DEFAULT_AGENT_RUNTIME_CAPABILITY] })
+      }
+      if (method === 'agent.resolveDefault') {
+        return replied({ agent: 'codex', source: 'project', projectName: 'orca' })
       }
       if (method === 'worktree.create') {
         return replied({
@@ -460,6 +464,11 @@ describe('NewWorktreeModal project targets', () => {
     await flushUpdates()
     // The Run on field shows the picked server's glyph, as its row does.
     expect(findAllByHostType(renderer.root, 'Server')).toHaveLength(1)
+    expect(
+      findAllByHostType(renderer.root, 'Text').some(
+        (node) => node.props.children === 'Codex · Project default'
+      )
+    ).toBe(true)
     expect(pickerItems(renderer, 'Run on')[0]?.label).toBe(LOCAL_HOST_LABEL)
     act(() => sourceInputs(renderer)[0]!.props.onChangeText('srv-wt'))
     const form = renderer.root.find((node) => typeof node.props.onCreate === 'function')
@@ -468,7 +477,7 @@ describe('NewWorktreeModal project targets', () => {
 
     expect(server).toHaveBeenCalledWith(
       'worktree.create',
-      expect.objectContaining({ repo: 'id:server-repo' }),
+      expect.objectContaining({ repo: 'id:server-repo', startupAgent: 'codex' }),
       expect.anything()
     )
     expect(desktop).not.toHaveBeenCalledWith(

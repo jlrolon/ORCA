@@ -13,11 +13,13 @@ when requesting a child of the current workspace.
 
 ```text
 # Child of the current worktree.
-ORCA orchestration worker-start --task <task_id> --worktree new-child --agent codex --setup run
+ORCA orchestration worker-start --task <task_id> --worktree new-child --agent default --setup run
 
 # On a connected server; the Run stays on yours.
-ORCA orchestration worker-start --task <task_id> --on <environment> --worktree new-top-level --repo <exact_remote_repo_selector> --name <name> --agent codex --setup run
+ORCA orchestration worker-start --task <task_id> --on <environment> --worktree new-top-level --repo <exact_remote_repo_selector> --name <name> --agent default --setup run
 ```
+
+`--agent default` uses the project that owns the selected workspace or target repository, not the coordinator project. Select an exact `--repo` for cross-project new work; pass an explicit agent ID when the user names one.
 
 `--name` is optional: without it Orca picks a name as it does for an unnamed
 workspace, and the start output names the workspace it created.
