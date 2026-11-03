@@ -20,6 +20,7 @@ import { getMobileTerminalTabHostAgentIdentity } from './mobile-terminal-tab-age
 import { mobileSessionTabCardContent } from './mobile-session-tab-card-content'
 import { MobileSessionTabCardFooter } from './MobileSessionTabCardFooter'
 import { useShellSideRail } from '../layout/use-shell-side-rail'
+import { SessionListLongPressOverride } from '../navigation/session-list-long-press-context'
 
 export function MobileSessionSurface({ controller }: { controller: MobileSessionController }) {
   useMobileColorScheme()
@@ -88,50 +89,52 @@ export function MobileSessionSurface({ controller }: { controller: MobileSession
   const hostName =
     controller.worktreeHostId === 'local' ? (server ? server.name : controller.hostName) : null
   return (
-    <View ref={setMobileSessionRootRef} style={styles.container}>
-      <View style={styles.kavInner}>
-        <MobileSessionHeader controller={controller} details={details} />
-        <MobileWorkerAutoCloseStrip controller={controller} />
-        {contentRow}
-      </View>
-      <DetailCardLayer>
-        <View
-          ref={details.layerRef}
-          collapsable={false}
-          pointerEvents="box-none"
-          onLayout={details.onLayout}
-          style={detailLayer}
-        >
-          {details.visual ? (
-            <AnchoredDetailCard
-              {...details.visual}
-              bounds={details.bounds}
-              contentRef={details.contentRef}
-              boundaryRefs={details.boundaryRefs}
-              active={details.active && !missingSource}
-              obscured={obscured || missingSource}
-              onSettled={details.onSettled}
-              title={
-                tabContent?.title ??
-                (controller.worktreeName || t('session.header.terminalTitle', 'Terminal'))
-              }
-              detail={tabContent ? tabContent.detail : controller.worktreePath}
-              footer={
-                tabContent ? (
-                  footer
-                ) : hostName ? (
-                  <>
-                    <StatusDot state={controller.connState} />
-                    <Text style={styles.sessionMetaText}>{hostName}</Text>
-                  </>
-                ) : null
-              }
-            />
-          ) : null}
+    <SessionListLongPressOverride action={controller.requestLeaveToSessionList}>
+      <View ref={setMobileSessionRootRef} style={styles.container}>
+        <View style={styles.kavInner}>
+          <MobileSessionHeader controller={controller} details={details} />
+          <MobileWorkerAutoCloseStrip controller={controller} />
+          {contentRow}
         </View>
-      </DetailCardLayer>
-      <MobileSessionSheets controller={controller} />
-    </View>
+        <DetailCardLayer>
+          <View
+            ref={details.layerRef}
+            collapsable={false}
+            pointerEvents="box-none"
+            onLayout={details.onLayout}
+            style={detailLayer}
+          >
+            {details.visual ? (
+              <AnchoredDetailCard
+                {...details.visual}
+                bounds={details.bounds}
+                contentRef={details.contentRef}
+                boundaryRefs={details.boundaryRefs}
+                active={details.active && !missingSource}
+                obscured={obscured || missingSource}
+                onSettled={details.onSettled}
+                title={
+                  tabContent?.title ??
+                  (controller.worktreeName || t('session.header.terminalTitle', 'Terminal'))
+                }
+                detail={tabContent ? tabContent.detail : controller.worktreePath}
+                footer={
+                  tabContent ? (
+                    footer
+                  ) : hostName ? (
+                    <>
+                      <StatusDot state={controller.connState} />
+                      <Text style={styles.sessionMetaText}>{hostName}</Text>
+                    </>
+                  ) : null
+                }
+              />
+            ) : null}
+          </View>
+        </DetailCardLayer>
+        <MobileSessionSheets controller={controller} />
+      </View>
+    </SessionListLongPressOverride>
   )
 }
 
