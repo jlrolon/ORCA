@@ -13,7 +13,7 @@ import { terminalCreateTeamAllocation } from './terminal-create-team-allocation'
 import { createIdempotentCallback } from '../../orca-runtime-report-pty-spawn-commit'
 import { recordPtySurface, spawnSurfaceClaimSequence } from '../../pty-recorded-surface-topology'
 import { agentLaunchTokenFor, withAgentLaunchToken } from '../../../agent-launch/agent-launch-token'
-import { seedPtyLaunchTitle } from './pty-launch-title'
+import { finishCreatedTerminalPty, type CreatedTerminalPtyHost } from './pty-launch-title'
 import { migratedPaneRestoreHint } from '../../migrated-pane-restore-cwd'
 import { paneSize, resolvePtyFirstSize } from '../../../ipc/pty/pty-first-size'
 
@@ -233,14 +233,17 @@ export abstract class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTermi
             ...(result.incarnationId ? { incarnationId: result.incarnationId } : {})
           })
         }
-        const pty = this.getOrCreatePtyWorktreeRecord(result.id)
+        const pty = finishCreatedTerminalPty(
+          // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: helper is this method body; protected pty and title members stay on the class.
+          this as unknown as CreatedTerminalPtyHost,
+          result,
+          presentation,
+          launch,
+          launchTitleAt,
+          tabId,
+          launchOpts
+        )
         if (pty) {
-          pty.runtimeSessionOwned = true
-          if (!launch.adoptedStablePane) {
-            seedPtyLaunchTitle(pty, launch.effectiveTitle, launchTitleAt, (title, at) =>
-              this.setPtyManagementTitleFromObservedTitle(pty, title, at)
-            )
-          }
           this.watchLaunchComposer(
             result.id,
             recordTerminalLaunchMetadata(pty, result, launch, launchOpts.command)
@@ -256,7 +259,7 @@ export abstract class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTermi
           this.publishPtyBackedMobileSessionTerminal(workspace.id, pty, {
             tabId,
             leafId,
-            title: launch.effectiveTitle ?? null,
+            title: pty.customTitle ?? launch.effectiveTitle ?? null,
             activate: presentation === 'focused',
             selectIfNoActiveTab: presentation !== 'background',
             ...(launch.effectiveViewMode ? { viewMode: launch.effectiveViewMode } : {}),
@@ -271,7 +274,7 @@ export abstract class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTermi
           cwd: savedStartupCwd,
           launchOpts: {
             ...launchOpts,
-            title: pty?.title ?? launch.effectiveTitle ?? undefined,
+            title: pty?.customTitle ?? pty?.title ?? launch.effectiveTitle ?? undefined,
             launchAgent: pty?.launchAgent ?? undefined,
             viewMode: launch.effectiveViewMode
           },
