@@ -14435,6 +14435,14 @@
                   "title": "{{reviewLabelCap}} not supported here",
                   "body": "This repository provider does not support creating a {{reviewLabel}} from Orca."
                 }
+              },
+              "commentOptions": {
+                "triggerActive": "Comment display options ({{value0}})",
+                "hideResolved": "Hide resolved threads",
+                "hiddenResolved": "{{count}} resolved threads hidden",
+                "hiddenResolved_one": "{{count}} resolved thread hidden",
+                "hiddenResolved_other": "{{count}} resolved threads hidden",
+                "showResolved": "Show"
               }
             }
           },
