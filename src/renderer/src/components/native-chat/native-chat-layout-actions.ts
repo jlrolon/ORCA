@@ -8,7 +8,7 @@ import { newAgentLaunchRequestId } from '@/lib/agent-launch-request-id'
 import { launchAgentInNewTab } from '@/lib/launch-agent-in-new-tab'
 import { captureNativeChatComposerFocusIntent } from '@/components/native-chat/use-native-chat-composer-reveal-focus'
 import { requestActiveTerminalPaneSplit } from '@/components/tab-bar/request-active-terminal-pane-split'
-import type { NativeChatSplitDirection } from './native-chat-split-shortcut'
+import type { NativeChatSplitDirection } from './native-chat-pane-shortcut'
 
 export type NativeChatSplitTarget =
   | { kind: 'terminal-pane'; terminalTabId: string }
