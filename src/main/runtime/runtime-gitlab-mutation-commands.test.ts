@@ -11,7 +11,7 @@ vi.mock('../source-control/hosted-review-branch-cache', () => ({
 }))
 
 import { RuntimeGitLabMutationCommands } from './runtime-gitlab-mutation-commands'
-import { getStoredRepoExecutionHostId } from '../repo-execution-host'
+import { getStoredRepoExecutionHostId } from '../workspaces/execution-host/repo-execution-host'
 
 const repo: Repo = {
   id: 'repo-1',

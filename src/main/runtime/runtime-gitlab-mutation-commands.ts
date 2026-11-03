@@ -23,7 +23,7 @@ import {
 import { getRepoRoutingConnectionId } from '../../shared/execution-host'
 import { invalidateHostedReviewBranchCache } from '../source-control/hosted-review-branch-cache'
 import { refreshGitLabApprovals } from '../gitlab/mr-approval-batch'
-import { getStoredRepoExecutionHostId } from '../repo-execution-host'
+import { getStoredRepoExecutionHostId } from '../workspaces/execution-host/repo-execution-host'
 
 type LocalGitArgs = [] | [{ wslDistro?: string }]
 
