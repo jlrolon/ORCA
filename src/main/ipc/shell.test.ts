@@ -3,6 +3,7 @@ import { normalize, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const {
+  fromWebContentsMock,
   getSpawnArgsForWindowsMock,
   handleMock,
   openPathMock,
@@ -12,6 +13,7 @@ const {
   spawnMock,
   statMock
 } = vi.hoisted(() => ({
+  fromWebContentsMock: vi.fn(),
   getSpawnArgsForWindowsMock: vi.fn(),
   handleMock: vi.fn(),
   openPathMock: vi.fn(),
@@ -23,6 +25,9 @@ const {
 }))
 
 vi.mock('electron', () => ({
+  BrowserWindow: {
+    fromWebContents: fromWebContentsMock
+  },
   ipcMain: {
     handle: handleMock
   },
@@ -108,6 +113,7 @@ describe('registerShellHandlers', () => {
 
   beforeEach(() => {
     handleMock.mockReset()
+    fromWebContentsMock.mockReset()
     getSpawnArgsForWindowsMock.mockReset()
     openPathMock.mockReset()
     resolveCliCommandMock.mockReset()
@@ -368,6 +374,42 @@ describe('registerShellHandlers', () => {
           Object.defineProperty(process, 'platform', platformDescriptor)
         }
       }
+    })
+  })
+
+  describe('native file pickers', () => {
+    const pickerChannels = [
+      'shell:pickDirectory',
+      'shell:pickAttachment',
+      'shell:pickAttachments',
+      'shell:pickImage',
+      'shell:pickRepoIconImage',
+      'shell:pickAudio'
+    ]
+
+    it.each(pickerChannels)('%s opens as a modal of the window that asked', async (channel) => {
+      const sender = { id: 7 }
+      const senderWindow = { id: 'window-7' }
+      fromWebContentsMock.mockReturnValue(senderWindow)
+      showOpenDialogMock.mockResolvedValue({ canceled: true, filePaths: [] })
+
+      await getHandler(channel)({ sender }, {})
+
+      expect(fromWebContentsMock).toHaveBeenCalledWith(sender)
+      expect(showOpenDialogMock).toHaveBeenCalledTimes(1)
+      expect(showOpenDialogMock.mock.calls[0][0]).toBe(senderWindow)
+      expect(showOpenDialogMock.mock.calls[0][1]).toHaveProperty('properties')
+    })
+
+    it.each(pickerChannels)('%s still opens when the sender has no window', async (channel) => {
+      fromWebContentsMock.mockReturnValue(null)
+      showOpenDialogMock.mockResolvedValue({ canceled: true, filePaths: [] })
+
+      await getHandler(channel)({ sender: { id: 8 } }, {})
+
+      expect(showOpenDialogMock).toHaveBeenCalledTimes(1)
+      expect(showOpenDialogMock.mock.calls[0]).toHaveLength(1)
+      expect(showOpenDialogMock.mock.calls[0][0]).toHaveProperty('properties')
     })
   })
 
