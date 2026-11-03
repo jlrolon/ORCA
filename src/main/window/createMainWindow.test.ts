@@ -34,6 +34,8 @@ vi.mock('../browser/browser-client-page-renderer-runtime', async () => {
 import { createMainWindow, loadMainWindow } from './createMainWindow'
 import { ipcMain } from 'electron'
 import { getBrowserClientHostId } from '../browser/browser-client-host-id'
+import { formatOnDeviceModelArgument } from '../../shared/on-device-text-generation'
+import { resolveOnDeviceModelHelperPath } from '../on-device-model/on-device-model-paths'
 import {
   formatBrowserClientHostIdArgument,
   readBrowserClientHostIdArgument
@@ -328,7 +330,11 @@ describe('createMainWindow', () => {
     createMainWindow(null)
 
     const stamped = browserWindowMock.mock.calls[0]?.[0].webPreferences?.additionalArguments
-    expect(stamped).toEqual([formatBrowserClientHostIdArgument(getBrowserClientHostId())])
+    expect(stamped).toEqual([
+      formatBrowserClientHostIdArgument(getBrowserClientHostId()),
+      // The provider flag follows whether this build shipped the helper.
+      formatOnDeviceModelArgument(resolveOnDeviceModelHelperPath() !== null)
+    ])
     expect(readBrowserClientHostIdArgument(stamped ?? [])).toBe(getBrowserClientHostId())
 
     // Electron 43 does not inherit embedder arguments; inject a hostile stamp to prove the handler strips it.

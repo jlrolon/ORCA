@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react'
-import { RefreshCw, Save, Sparkles, Terminal, TriangleAlert } from 'lucide-react'
+import { Cpu, RefreshCw, Save, Sparkles, Terminal, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -24,7 +24,13 @@ import type { SourceControlTextActionId } from '../../../../../../shared/source-
 import type { SourceControlAiWriteTarget } from '../../../../../../shared/source-control-ai-recipe-save'
 import type { GlobalSettings } from '../../../../../../shared/global-settings-types'
 import type { Repo } from '../../../../../../shared/repo-types'
-import type { TuiAgent } from '../../../../../../shared/tui-agent'
+import { ALL_TUI_AGENTS } from '../../../../../../shared/tui-agent-display-names'
+import {
+  isOnDeviceTextGenerationId,
+  type TextGenerationAgentId
+} from '../../../../../../shared/on-device-text-generation'
+import { useOnDeviceTextGenerationAvailable } from '@/hooks/use-on-device-text-generation-available'
+import { onDeviceSaveDefaultsMessage } from './on-device-defaults-guard'
 import { toast } from 'sonner'
 import { SourceControlActionVariableChips } from '../../../source-control/SourceControlActionVariableChips'
 import { sourceControlTextGenerationDefaultsMatchTarget } from './text-generation-defaults'
@@ -74,7 +80,14 @@ export function getDefaultSourceControlTextGenerationSaveTargetKey(
   return defaultTarget ? sourceControlTextGenerationSaveTargetKey(defaultTarget.target) : 'global'
 }
 
-function agentLabel(agentId: TuiAgent): string {
+function toAgentChoice(value: string): CommitMessageGenerationAgentChoice {
+  if (isOnDeviceTextGenerationId(value) || isCustomAgentId(value)) {
+    return value
+  }
+  return ALL_TUI_AGENTS.find((candidate) => candidate === value) ?? ''
+}
+
+function agentLabel(agentId: TextGenerationAgentId): string {
   return getAgentCatalog().find((agent) => agent.id === agentId)?.label ?? agentId
 }
 
@@ -91,7 +104,11 @@ export function SourceControlTextGenerationDialogForm({
   onOpenChange,
   onSaveDefaults
 }: SourceControlTextGenerationDialogFormProps): React.JSX.Element {
-  const capabilities = useMemo(() => listCommitMessageAgentCapabilities(), [])
+  const onDeviceAvailable = useOnDeviceTextGenerationAvailable()
+  const capabilities = useMemo(
+    () => listCommitMessageAgentCapabilities({ onDevice: onDeviceAvailable }),
+    [onDeviceAvailable]
+  )
   const showCustomAgent = Boolean(
     baseParams && (isCustomAgentId(baseParams.agentId) || baseParams.customAgentCommand?.trim())
   )
@@ -165,12 +182,16 @@ export function SourceControlTextGenerationDialogForm({
       saveTarget: SourceControlTextGenerationSaveTarget,
       options: { showToast: boolean; showErrors: boolean }
     ): Promise<boolean> => {
-      if (!params || saving || !paramsPlanResult?.ok) {
+      // A per-action recipe stores a CLI agent id, so the provider has no default to save.
+      const onDeviceBlocked = Boolean(params && isOnDeviceTextGenerationId(params.agentId))
+      if (!params || saving || !paramsPlanResult?.ok || onDeviceBlocked) {
         if (options.showErrors) {
           setGenerationError(
-            paramsPlanResult && !paramsPlanResult.ok
-              ? paramsPlanResult.error
-              : 'Choose an agent before saving defaults.'
+            onDeviceBlocked
+              ? onDeviceSaveDefaultsMessage()
+              : paramsPlanResult && !paramsPlanResult.ok
+                ? paramsPlanResult.error
+                : 'Choose an agent before saving defaults.'
           )
         }
         return false
@@ -236,7 +257,7 @@ export function SourceControlTextGenerationDialogForm({
               if (value === UNCONFIGURED_AGENT_SELECT_VALUE) {
                 return
               }
-              setAgentId(value === CUSTOM_AGENT_ID ? CUSTOM_AGENT_ID : (value as TuiAgent))
+              setAgentId(toAgentChoice(value))
               setGenerationError(null)
             }}
           >
@@ -252,7 +273,11 @@ export function SourceControlTextGenerationDialogForm({
               {capabilities.map((capability) => (
                 <SelectItem key={capability.id} value={capability.id}>
                   <span className="flex items-center gap-2">
-                    <AgentIcon agent={capability.id} size={14} />
+                    {isOnDeviceTextGenerationId(capability.id) ? (
+                      <Cpu className="size-3.5" />
+                    ) : (
+                      <AgentIcon agent={capability.id} size={14} />
+                    )}
                     {agentLabel(capability.id)}
                   </span>
                 </SelectItem>

@@ -1,11 +1,15 @@
+/* eslint-disable max-lines */
 import {
   CUSTOM_AGENT_ID,
   getCommitMessageAgentSpec,
   getCommitMessageModel,
   isCustomAgentId,
   listCommitMessageAgentCapabilities,
-  resolveCommitMessageAgentChoice
+  resolveCommitMessageAgentChoice,
+  type CommitMessageAgentChoice
 } from './commit-message-agent-spec'
+import { isOnDeviceTextGenerationId } from './on-device-text-generation'
+import { resolveOnDeviceSourceControlAi } from './source-control-ai-on-device-resolution'
 import { LOCAL_COMMIT_MESSAGE_HOST_KEY } from './commit-message-host-key'
 import {
   textGenerationFailure,
@@ -14,7 +18,6 @@ import {
 } from './text-generation-failure-copy'
 import type { GlobalSettings } from './global-settings-types'
 import type { Repo } from './repo-types'
-import type { TuiAgent } from './tui-agent'
 import { mergeLegacyCommitMessageAiIntoSourceControlAi as mergeLegacySettings } from './source-control-ai-legacy-reconciliation'
 import { projectSourceControlAiToLegacyCommitMessageAi as projectLegacySettings } from './source-control-ai-legacy-projection'
 import {
@@ -52,7 +55,7 @@ import type {
 export const DEFAULT_SOURCE_CONTROL_AI_PR_CREATION_DEFAULTS = DEFAULT_PR_CREATION_DEFAULTS
 
 export type ResolvedSourceControlAiGenerationParams = {
-  agentId: TuiAgent | 'custom'
+  agentId: CommitMessageAgentChoice
   model: string
   thinkingLevel?: string
   customPrompt?: string
@@ -161,9 +164,6 @@ export function resolveSourceControlAiForOperation(
     input.prCreationProductDefaults
   )
   const actionRecipe = resolveActionRecipeForTextOperation(source, repoOverrides, input.operation)
-  if (!actionRecipe.commandInputTemplate.trim()) {
-    return resolveFailure(textGenerationFailure(COMMAND_TEMPLATE_EMPTY[input.operation]))
-  }
   const preferredAgent = hasActionAgentRecipe(actionRecipe) ? actionRecipe.agentId : source.agentId
   const agentChoice = resolveCommitMessageAgentChoice(
     preferredAgent,
@@ -173,16 +173,28 @@ export function resolveSourceControlAiForOperation(
   if (!agentChoice) {
     return agentUnsupported()
   }
-
   const customAgentCommand =
     repoOverrides?.customAgentCommand?.trim() || source.customAgentCommand.trim()
+  const customPrompt = resolveInstructionsFromNormalized(
+    source,
+    repoOverrides,
+    input.operation,
+    legacy?.customPrompt
+  )
+  // The template is the prompt skeleton for every provider, so an empty one yields an empty prompt.
+  if (!actionRecipe.commandInputTemplate.trim()) {
+    return resolveFailure(textGenerationFailure(COMMAND_TEMPLATE_EMPTY[input.operation]))
+  }
+  if (isOnDeviceTextGenerationId(agentChoice)) {
+    return resolveOnDeviceSourceControlAi({
+      commandInputTemplate: actionRecipe.commandInputTemplate,
+      customPrompt,
+      prCreationDefaults
+    })
+  }
+
   const commonParams = {
-    customPrompt: resolveInstructionsFromNormalized(
-      source,
-      repoOverrides,
-      input.operation,
-      legacy?.customPrompt
-    ),
+    customPrompt,
     commandInputTemplate: actionRecipe.commandInputTemplate,
     ...(actionRecipe.agentArgs !== undefined ? { agentArgs: actionRecipe.agentArgs } : {})
   }

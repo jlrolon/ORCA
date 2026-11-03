@@ -1,7 +1,9 @@
 import { sourceControlModelLabel, sourceControlThinkingLabel } from './source-control-model-label'
 import type { JSX } from 'react'
-import { Terminal } from 'lucide-react'
+import { Cpu, Terminal } from 'lucide-react'
 import { CUSTOM_PROMPT_PLACEHOLDER } from '../../../../shared/commit-message-prompt'
+import { isOnDeviceTextGenerationId } from '../../../../shared/on-device-text-generation'
+import { useOnDeviceTextGenerationAvailable } from '@/hooks/use-on-device-text-generation-available'
 import {
   CUSTOM_AGENT_ID,
   listCommitMessageAgentCapabilities,
@@ -46,6 +48,7 @@ export function AiCommitPrSettingsFields({
   onThinkingChange,
   writeConfig
 }: AiCommitPrSettingsFieldsProps): JSX.Element {
+  const onDeviceAvailable = useOnDeviceTextGenerationAvailable()
   return (
     <div className="flex flex-col gap-2.5">
       <div className="grid grid-cols-[92px_minmax(0,1fr)] items-center gap-3">
@@ -62,7 +65,11 @@ export function AiCommitPrSettingsFields({
             >
               {activeCapability ? (
                 <>
-                  <AgentIcon agent={activeCapability.id} size={14} />
+                  {isOnDeviceTextGenerationId(activeCapability.id) ? (
+                    <Cpu className="size-3.5" />
+                  ) : (
+                    <AgentIcon agent={activeCapability.id} size={14} />
+                  )}
                   <span className="truncate">
                     {commitMessageAgentLabel(activeCapability.id, activeCapability)}
                   </span>
@@ -94,14 +101,20 @@ export function AiCommitPrSettingsFields({
             </span>
           </SelectTrigger>
           <SelectContent portalContainer={selectPortalRoot} position="popper" align="start">
-            {listCommitMessageAgentCapabilities().map((capability) => (
-              <SelectItem key={capability.id} value={capability.id} className="cursor-pointer">
-                <span className="flex items-center gap-2">
-                  <AgentIcon agent={capability.id} size={14} />
-                  <span>{commitMessageAgentLabel(capability.id, capability)}</span>
-                </span>
-              </SelectItem>
-            ))}
+            {listCommitMessageAgentCapabilities({ onDevice: onDeviceAvailable }).map(
+              (capability) => (
+                <SelectItem key={capability.id} value={capability.id} className="cursor-pointer">
+                  <span className="flex items-center gap-2">
+                    {isOnDeviceTextGenerationId(capability.id) ? (
+                      <Cpu className="size-3.5" />
+                    ) : (
+                      <AgentIcon agent={capability.id} size={14} />
+                    )}
+                    <span>{commitMessageAgentLabel(capability.id, capability)}</span>
+                  </span>
+                </SelectItem>
+              )
+            )}
             <SelectItem value={CUSTOM_AGENT_ID} className="cursor-pointer">
               <span className="flex items-center gap-2">
                 <Terminal className="size-3.5" />
