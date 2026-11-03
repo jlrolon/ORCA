@@ -158,7 +158,6 @@ describe('Pi host launch resolution', () => {
     expect(launch.previous).toBeNull()
     expect(launch.sessionFile).toBeUndefined()
     expect(launch.forkFile).toBeUndefined()
-    expect(launch.replacement).toBeUndefined()
     expect(buildPiRpcLaunch(launch).args).toEqual(['--mode', 'rpc'])
     expect(piRpcProviderLink(launch, join(root, 'fresh.jsonl'), 3, 'fresh', 101).origin).toBe(
       'created'
@@ -235,22 +234,37 @@ describe('Pi host launch resolution', () => {
     expect(buildPiRpcLaunch(launch).args).toEqual(['--mode', 'rpc', '--session', file])
   })
 
-  it('distinguishes an unsaved creation from an existing session that could not restore', async () => {
+  it.each(['created', 'resumed'] as const)(
+    'refuses a %s session whose file is gone, starting no other',
+    async (origin) => {
+      const h = await setup()
+      h.withPrior(h.prior(join(root, 'missing.jsonl'), origin))
+      await expect(h.resolver(identity)).rejects.toMatchObject({
+        name: 'AgentSessionAcquisitionRefusal',
+        reason: 'savedConversationMissing'
+      })
+    }
+  )
+
+  it('keeps adopted, unreadable and malformed session files distinct from a missing one', async () => {
     const h = await setup()
-    const missing = join(root, 'missing.jsonl')
-    h.withPrior(h.prior(missing))
-    const unsaved = await h.resolver(identity)
-    expect(unsaved.replacement).toBe('unsaved')
-    expect(piRpcProviderLink(unsaved, join(root, 'new.jsonl'), 2, 'new', 200)).toMatchObject({
-      origin: 'created',
-      supersedesKey: agentSessionProviderHandleKey(h.prior(missing).handle)
+    h.withPrior(h.prior(join(root, 'adopted-missing.jsonl'), 'adopted'))
+    await expect(h.resolver(identity)).rejects.toMatchObject({
+      refusal: {
+        code: 'agent_session_identity_required',
+        details: { reason: 'transcriptNotFound' }
+      }
     })
-    h.withPrior(h.prior(missing, 'resumed'))
-    const lost = await h.resolver(identity)
-    expect(lost.replacement).toBe('restore-failed')
-    expect(
-      piRpcProviderLink(lost, join(root, 'replacement.jsonl'), 2, 'replace', 200)
-    ).toMatchObject({ replaces: { reason: 'restore-failed', replacedAt: 200 } })
+    const malformed = join(root, 'malformed.jsonl')
+    await writeFile(malformed, 'not a Pi session header')
+    h.withPrior(h.prior(malformed, 'resumed'))
+    const parse = await h.resolver(identity).catch((error) => error)
+    expect(parse).toBeInstanceOf(Error)
+    expect(parse).not.toMatchObject({ reason: 'savedConversationMissing' })
+    h.withPrior(h.prior(root, 'resumed'))
+    const unreadable = await h.resolver(identity).catch((error) => error)
+    expect(unreadable).toBeInstanceOf(Error)
+    expect(unreadable).not.toMatchObject({ reason: 'savedConversationMissing' })
   })
 
   it('refuses a different execution host and a foreign account home before resolving paths', async () => {

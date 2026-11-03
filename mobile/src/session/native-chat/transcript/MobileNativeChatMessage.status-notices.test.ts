@@ -181,8 +181,24 @@ describe('MobileNativeChatMessage status notices', () => {
       { hostName: null, agentName: 'Claude' }
     )
     expect(text.props.children).toBe(
-      'Claude n’a pas trouvé la conversation enregistrée de ce chat. Démarrez un nouveau chat pour continuer.'
+      'Claude n’a pas trouvé la conversation enregistrée de ce chat. Les messages enregistrés par Orca restent dans ce chat. Utilisez « Transférer à un autre Agent » sur ordinateur pour démarrer une nouvelle session avec ce contexte.'
     )
+  })
+
+  it("keeps an older host's missing-conversation words as it wrote them", async () => {
+    await activateMobileUiLocale('fr')
+    const older =
+      "Claude couldn't find this chat's saved conversation. Start a new chat to continue."
+    const host = agentSessionFailureWords(agentSessionFailureFact('savedConversationMissing'), {
+      surface: 'row',
+      agentName: 'Claude'
+    })
+    const body: unknown = { kind: 'status', tone: 'error', ...host, text: older }
+    if (!isAdmissibleAgentJournalItemBody(body) || body.kind !== 'status') {
+      throw new Error('Status fixture was not admitted')
+    }
+    const text = renderNotice(body, { hostName: null, agentName: 'Claude' })
+    expect(text.props.children).toBe(older)
   })
 
   it.each(['without reset', 'with reset', 'from an old host'] as const)(

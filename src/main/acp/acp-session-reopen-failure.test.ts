@@ -9,26 +9,13 @@ import { AcpAgentError, AcpRequestTimeoutError } from './acp-errors'
 import { AcpScriptedAgent } from './acp-scripted-agent.test-support'
 import { agentSessionFailureFact } from '../../shared/agent-session/failures/agent-session-failure'
 import { agentSessionFailureWords } from '../../shared/agent-session/failures/agent-session-failure-words'
-import { acpReopenTakeover } from './acp-session-reopen-failure'
+import { acpReopenFailure } from './acp-session-reopen-failure'
 
 it.each(['ServerUnavailable', 'CatalogNotReady'])(
   'retains the saved session on a temporary %s load answer',
   (errorName) => {
     const error = new AcpAgentError(-32603, 'not ready', { errorName })
-    const warn = vi.fn()
-    expect(() =>
-      acpReopenTakeover(
-        error,
-        {
-          key: 'saved-key',
-          sessionId: 'saved-id',
-          mayBeUnsaved: () => false,
-          unannouncedLosses: () => []
-        },
-        { over: false, now: 1, warn }
-      )
-    ).toThrow(error)
-    expect(warn).not.toHaveBeenCalled()
+    expect(() => acpReopenFailure(error, 'saved-id', false)).toThrow(error)
   }
 )
 
@@ -37,13 +24,12 @@ afterEach(async () => {
   await closeProviderTimelineRigs()
 })
 
-it('propagates a temporary load envelope before takeover or a dead-child assertion can replace it', async () => {
+it('propagates a temporary load envelope before a dead-child assertion can replace it', async () => {
   const rig = await openAcpAdapterRig({
     launch: {
       resume: {
         key: 'saved-key',
         sessionId: 'saved-id',
-        mayBeUnsaved: () => false,
         unannouncedLosses: () => []
       }
     },
@@ -74,7 +60,6 @@ it.each([
       resume: {
         key: 'saved-key',
         sessionId: 'saved-id',
-        mayBeUnsaved: () => false,
         unannouncedLosses: () => []
       }
     },
