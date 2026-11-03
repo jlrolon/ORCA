@@ -99,7 +99,10 @@ function createSshTarget(overrides: Partial<SshTarget> = {}): SshTarget {
 }
 
 describe('registerShellHandlers', () => {
-  const settings = { activeRuntimeEnvironmentId: null as string | null }
+  const settings = {
+    activeRuntimeEnvironmentId: null as string | null,
+    openInApplications: [] as { id: string; label: string; command: string }[]
+  }
   const sshTargets = new Map<string, SshTarget>()
   const store = {
     getSettings: () => settings,
@@ -116,6 +119,7 @@ describe('registerShellHandlers', () => {
     spawnMock.mockReset()
     statMock.mockReset()
     settings.activeRuntimeEnvironmentId = null
+    settings.openInApplications = []
     sshTargets.clear()
     openPathMock.mockResolvedValue('')
     resolveCliCommandMock.mockReturnValue('editor-cli')
@@ -168,6 +172,36 @@ describe('registerShellHandlers', () => {
           expect.any(String),
           [expect.stringContaining('"wsl+Ubuntu Preview" "/home/Ada Lovelace/project"')],
           expect.objectContaining({ windowsHide: true, windowsVerbatimArguments: true })
+        )
+      }
+    )
+
+    it.skipIf(process.platform === 'win32')(
+      'launches only editors main resolves from settings or built-ins',
+      async () => {
+        settings.openInApplications = [{ id: 'mine', label: 'Mine', command: 'my-editor --wait' }]
+        const handler = getHandler('shell:openInExternalEditor')
+        const local = { path: '/tmp/project', ownerHostId: 'local' }
+
+        for (const request of [
+          { openInApplicationId: 'unknown' },
+          { builtInEditorId: 'unknown' },
+          { command: 'touch /tmp/pwned' }
+        ]) {
+          await expect(handler({}, { ...local, ...request })).resolves.toEqual({
+            ok: false,
+            reason: 'launch-failed'
+          })
+        }
+        expect(spawnMock).not.toHaveBeenCalled()
+
+        await expect(handler({}, { ...local, openInApplicationId: 'mine' })).resolves.toEqual({
+          ok: true
+        })
+        expect(spawnMock).toHaveBeenLastCalledWith(
+          '/bin/sh',
+          ['-c', 'my-editor --wait /tmp/project'],
+          HIDDEN_EDITOR_LAUNCH_OPTIONS
         )
       }
     )
@@ -324,6 +358,7 @@ describe('registerShellHandlers', () => {
     it.each(['subl', 'code --reuse-window'])(
       'rejects the unsupported SSH launcher %s',
       async (command) => {
+        settings.openInApplications = [{ id: 'custom', label: 'Custom', command }]
         sshTargets.set('ssh-1', createSshTarget())
         const handler = getHandler('shell:openInExternalEditor')
 

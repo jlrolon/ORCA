@@ -139,6 +139,8 @@ export async function openWorktreePath(args: {
   runtimeEnvironmentId?: string | null
   ownerUnresolved?: boolean
   workspace?: WorkspaceOwnerRef | null
+  /** Saved Open In application; `command` only drives renderer capability checks. */
+  openInApplicationId?: string
   command?: string
   subject?: 'workspace' | 'path'
 }): Promise<void> {
@@ -181,7 +183,7 @@ export async function openWorktreePath(args: {
       ? await window.api.shell.openInFileManager(args.worktreePath, owner)
       : await window.api.shell.openInExternalEditor({
           path: args.worktreePath,
-          command: args.command,
+          openInApplicationId: args.openInApplicationId,
           connectionId: editorConnectionId,
           ownerHostId: owner
         })
@@ -196,12 +198,9 @@ function useOpenInWorktreePath({
   runtimeEnvironmentId,
   ownerUnresolved,
   workspace
-}: WorktreeOpenInMenuItemsProps): (
-  target: 'file-manager' | 'external-editor',
-  command?: string
-) => Promise<void> {
+}: WorktreeOpenInMenuItemsProps): (entry: OpenInMenuEntry) => Promise<void> {
   return useCallback(
-    async (target, command) => {
+    async ({ target, id, command }) => {
       await openWorktreePath({
         target,
         worktreePath,
@@ -209,6 +208,7 @@ function useOpenInWorktreePath({
         runtimeEnvironmentId,
         ownerUnresolved,
         workspace,
+        openInApplicationId: target === 'external-editor' ? id : undefined,
         command
       })
     },
@@ -254,7 +254,7 @@ export function WorktreeOpenInMenuItems({
             key={entry.id}
             onClick={stopMenuPropagation}
             onSelect={() => {
-              void openInWorktreePath(entry.target, entry.command)
+              void openInWorktreePath(entry)
             }}
             disabled={disabled || availability.disabled}
           >

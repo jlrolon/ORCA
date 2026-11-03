@@ -164,7 +164,7 @@ describe('WorktreeOpenInMenu', () => {
 
     expect(openInExternalEditorMock).toHaveBeenCalledWith({
       path: '/tmp/workspace',
-      command: undefined,
+      openInApplicationId: undefined,
       connectionId: null,
       ownerHostId: 'local'
     })
@@ -206,13 +206,14 @@ describe('WorktreeOpenInMenu', () => {
     await openWorktreePath({
       target: 'external-editor',
       worktreePath: '/tmp/workspace',
+      openInApplicationId: 'cursor-app',
       command: 'cursor'
     })
 
     expect(openInFileManagerMock).toHaveBeenCalledWith('/tmp/workspace', 'local')
     expect(openInExternalEditorMock).toHaveBeenCalledWith({
       path: '/tmp/workspace',
-      command: 'cursor',
+      openInApplicationId: 'cursor-app',
       connectionId: undefined,
       ownerHostId: 'local'
     })
@@ -243,16 +244,17 @@ describe('WorktreeOpenInMenu', () => {
     expect(openSettingsPageMock).toHaveBeenCalled()
   })
 
-  it('forwards the configured command when opening a configured launcher', async () => {
+  it('sends the configured launcher id, not its command, to main', async () => {
     await openWorktreePath({
       target: 'external-editor',
       worktreePath: '/tmp/workspace',
       connectionId: null,
+      openInApplicationId: 'cursor-app',
       command: 'cursor'
     })
     expect(openInExternalEditorMock).toHaveBeenCalledWith({
       path: '/tmp/workspace',
-      command: 'cursor',
+      openInApplicationId: 'cursor-app',
       connectionId: null,
       ownerHostId: 'local'
     })
@@ -310,12 +312,13 @@ describe('WorktreeOpenInMenu', () => {
       target: 'external-editor',
       worktreePath: '/home/ada/project',
       connectionId: 'ssh-1',
+      openInApplicationId: 'vscode',
       command: 'code'
     })
 
     expect(openInExternalEditorMock).toHaveBeenCalledWith({
       path: '/home/ada/project',
-      command: 'code',
+      openInApplicationId: 'vscode',
       connectionId: 'ssh-1',
       ownerHostId: 'ssh:ssh-1'
     })
@@ -470,12 +473,13 @@ describe('WorktreeOpenInMenu', () => {
         connectionId: null,
         runtimeEnvironmentId: 'managed-owner',
         workspace: { workspaceId: worktreeId, hostId: 'runtime:managed-owner' },
+        openInApplicationId: 'vscode',
         command: 'code'
       })
 
       expect(openInExternalEditorMock).toHaveBeenCalledWith({
         path: '/home/ada/project',
-        command: 'code',
+        openInApplicationId: 'vscode',
         connectionId: 'ssh-1',
         ownerHostId: 'runtime:managed-owner'
       })
