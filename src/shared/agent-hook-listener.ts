@@ -11,6 +11,7 @@ import {
 import { isProcessExitSessionEnd, parseHookEnvelope } from './agent-hook-listener/hook-envelope'
 import { readFirstString } from './agent-hook-listener/interactive-tool'
 import type { AgentHookEventPayload } from './agent-hook-listener/listener-event'
+import { readClaudeBatchToolUseIds } from './agent-hook-listener/claude-settled-permission-requests'
 import {
   normalizeClaudePromptId,
   normalizeGrokPromptId
@@ -280,6 +281,10 @@ export function normalizeHookPayload(
     grokPromptBoundary: grokActiveTurn ? true : undefined,
     compactTrigger,
     toolUseId: readFirstString(hookPayloadRecord, ['tool_use_id', 'toolUseId']),
+    batchToolUseIds:
+      source === 'claude' && eventName === 'PostToolBatch'
+        ? readClaudeBatchToolUseIds(hookPayloadRecord.tool_calls)
+        : undefined,
     toolAgentId: readFirstString(hookPayloadRecord, ['agent_id', 'agentId']),
     teammateName:
       source === 'claude' && eventName === 'TeammateIdle'
