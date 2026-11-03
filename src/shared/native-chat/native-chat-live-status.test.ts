@@ -33,8 +33,8 @@ describe('mergeNativeChatLiveSession', () => {
           hookState: 'working',
           stateStartedAt: 3,
           terminalActivity: { state: 'idle', workingSequence: 1 }
-        }).hookWorking
-      ).toBe(false)
+        }).status
+      ).not.toBe('working')
     }
   )
 

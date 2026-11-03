@@ -1,3 +1,4 @@
+import { translate } from '@/i18n/i18n'
 import { readNativeChatComposerDraft } from './native-chat-composer-draft-store'
 import { serializeNativeChatAgentReferences } from './native-chat-agent-reference-send'
 import {

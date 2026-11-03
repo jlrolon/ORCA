@@ -161,7 +161,7 @@ describe('useMobileNativeChatImageAttachments', () => {
     try {
       const client = makeClient([])
       const baseSend = vi.fn().mockResolvedValue('accepted')
-      // SAFETY: This test only uses the mocked sendRequest member.
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This test only calls the mocked sendRequest member.
       mount(baseArgs({ client: client as unknown as RpcClient, agent: 'hermes', baseSend }))
       const pressedAt = Date.now()
       await act(async () => {

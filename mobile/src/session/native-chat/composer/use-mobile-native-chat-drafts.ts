@@ -75,13 +75,7 @@ export function useMobileNativeChatDrafts(args: {
     text: string,
     options?: { preserveConversationCommands?: boolean }
   ) => void
-  acceptSend: (
-    origin: MobileNativeChatSendOrigin,
-    text: string,
-    images?: string[],
-    allowWaiting?: boolean
-  ) => string | void
-  discardPendingSend: (id: string) => void
+  acceptSend: (origin: MobileNativeChatSendOrigin, text: string, images?: string[]) => void
   holdUnconfirmedSend: (
     origin: MobileNativeChatSendOrigin,
     text: string,
@@ -195,8 +189,8 @@ export function useMobileNativeChatDrafts(args: {
   )
 
   const acceptSend = useCallback(
-    (origin: MobileNativeChatSendOrigin, text: string, images?: string[], allowWaiting = false) => {
-      if (!origin.pendingKey && !images?.length && !allowWaiting) {
+    (origin: MobileNativeChatSendOrigin, text: string, images?: string[]) => {
+      if (!origin.pendingKey && !images?.length) {
         return
       }
       pendingCounterRef.current += 1
@@ -211,22 +205,9 @@ export function useMobileNativeChatDrafts(args: {
           appendMobileNativeChatPending(previous, origin.draftKey, id, origin, text, images)
         )
       }
-      return id
     },
     []
   )
-
-  const discardPendingSend = useCallback((id: string) => {
-    const remove = (previous: Record<string, MobileNativeChatPendingMessage[]>) =>
-      Object.fromEntries(
-        Object.entries(previous).map(([key, items]) => [
-          key,
-          items.filter((item) => item.id !== id)
-        ])
-      )
-    setPendingBySession(remove)
-    setPendingWaitingForSession(remove)
-  }, [])
 
   const { holdUnconfirmedSend } = useMobileNativeChatUnconfirmedSends({
     draftKey,
@@ -312,7 +293,6 @@ export function useMobileNativeChatDrafts(args: {
     clearDraftForSend,
     restoreRejectedDraft,
     acceptSend,
-    discardPendingSend,
     holdUnconfirmedSend
   }
 }
