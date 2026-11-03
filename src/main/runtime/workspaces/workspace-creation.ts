@@ -30,6 +30,7 @@ import type { WorkspaceCreationHandle } from './workspace-lifecycle-creations'
 import { workspaceLifecycleKey } from './workspace-lifecycle-commands'
 import { getRepoExecutionHostId } from '../../../shared/execution-host'
 import { applyWorkspaceCreatePluginHook } from '../../plugins/hooks/workspace-create-plugin-hook'
+import { worktreeSetupReceipt } from './worktree-setup-receipt'
 
 export abstract class OrcaRuntimeWithCreateManagedWorktree extends OrcaRuntimeWithGetWorktreeTerminalProvisioningHost {
   protected abstract resolveLineageForWorktreeCreate(
@@ -110,10 +111,17 @@ export abstract class OrcaRuntimeWithCreateManagedWorktree extends OrcaRuntimeWi
     )
     // Match IPC routing: executionHostId-only SSH repos must not create locally.
     const createRoute = resolveWorktreeCreateRoute(repo)
+    const startupClaudeAccountId = await this.resolveStartupClaudeAccount(args, createRoute.kind, {
+      store,
+      settings: createSettings,
+      repo,
+      plannedPty: startupLaunchRuntime instanceof Error ? undefined : startupLaunchRuntime?.pty
+    })
     if (isFolderRepo(repo)) {
       // A folder workspace is a registration, not a filesystem create, so it is host-agnostic.
       return createRuntimeFolderWorktree({
         request: args,
+        startupClaudeAccountId,
         repo,
         startup: effectiveStartup,
         startupFollowup: effectiveStartupFollowup,
@@ -226,6 +234,7 @@ export abstract class OrcaRuntimeWithCreateManagedWorktree extends OrcaRuntimeWi
       startupTerminalPtyId
     } = await startRuntimeLocalWorktreeTerminals({
       request: args,
+      startupClaudeAccountId,
       repo,
       worktree,
       setup,
@@ -270,22 +279,14 @@ export abstract class OrcaRuntimeWithCreateManagedWorktree extends OrcaRuntimeWi
       ...(returnedSetup ? { setup: returnedSetup } : {}),
       ...(args.awaitTerminalProvisioning
         ? {
-            setupReceipt: {
+            setupReceipt: worktreeSetupReceipt({
               requested: effectiveDecision,
               hookFound,
-              startupPolicy: setup?.waitForAgentStartup
-                ? ('wait-for-setup' as const)
-                : ('start-immediately' as const),
-              state: !hookFound
-                ? ('not_configured' as const)
-                : effectiveDecision === 'skip' || !shouldRunSetup
-                  ? ('skipped' as const)
-                  : // The in-process setup hook already started; spawn_failed would strand retrying callers.
-                    didSpawnSetup || didStartInProcessSetupHook
-                    ? ('running' as const)
-                    : ('spawn_failed' as const),
-              ...(setupTerminalHandle ? { terminalHandle: setupTerminalHandle } : {})
-            }
+              waitForAgentStartup: setup?.waitForAgentStartup,
+              shouldRunSetup,
+              setupStarted: didSpawnSetup || didStartInProcessSetupHook,
+              terminalHandle: setupTerminalHandle
+            })
           }
         : {}),
       ...(defaultTabs ? { defaultTabs } : {}),
