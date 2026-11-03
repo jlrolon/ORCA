@@ -22,7 +22,6 @@ vi.mock('@/i18n/i18n', () => ({ translate: (_key: string, fallback: string) => f
 vi.mock('@/lib/ipc-error', () => ({
   extractIpcErrorMessage: (error: Error) => error.message
 }))
-vi.mock('@/lib/connection-context', () => ({ getConnectionId: () => null }))
 vi.mock('@/lib/create-untitled-markdown', () => ({
   createUntitledMarkdownFile: mocks.createFile
 }))

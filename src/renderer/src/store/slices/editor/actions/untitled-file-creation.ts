@@ -1,7 +1,7 @@
 import { toast } from 'sonner'
 import { translate } from '@/i18n/i18n'
 import { extractIpcErrorMessage } from '@/lib/ipc-error'
-import { getConnectionId } from '@/lib/connection-context'
+import { getConnectionIdFromState } from '@/lib/connection-owner-resolution'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../../../shared/constants'
 import {
   assertEditorFileOperationCurrent,
@@ -96,7 +96,7 @@ async function openSeededUntitledFile(
       const fileInfo = await createUntitledMarkdownFile(
         directory,
         FLOATING_TERMINAL_WORKTREE_ID,
-        getConnectionId(FLOATING_TERMINAL_WORKTREE_ID) ?? undefined,
+        getConnectionIdFromState(get(), FLOATING_TERMINAL_WORKTREE_ID) ?? undefined,
         { kind: 'local' },
         { newFile: { extension, content: await readContent() } }
       )
