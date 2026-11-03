@@ -3,6 +3,7 @@ import { createLocalizedCatalog } from '@/i18n/localized-catalog'
 import { translate } from '@/i18n/i18n'
 import { translateSearchKeyword } from './settings-search-keywords'
 import { getNewWorktreeCardStyleSearchEntry } from './new-worktree-card-style-search-entry'
+import { getPromptFirstComposerSearchEntry } from './prompt-first-composer-experimental-search-entry'
 import { getEphemeralVmsSearchEntry } from './ephemeral-vms-search'
 import { getBrowserExtensionsExperimentalSearchEntry } from './browser-extensions-experimental-search'
 import { getWslHostsExperimentalSearchEntry } from './wsl-hosts-experimental-search'
@@ -48,6 +49,7 @@ export const getExperimentalPaneSearchEntries = createLocalizedCatalog(
         )
       ]
     },
+    getPromptFirstComposerSearchEntry(),
     {
       title: translate(
         'auto.components.settings.experimental.search.agentDashboard.title',
@@ -222,6 +224,12 @@ export function getExperimentalSearchEntry() {
       translate(
         'auto.components.settings.experimental.search.newWorktreeCardStyle.title',
         'New card style'
+      )
+    ),
+    promptFirstComposer: findEntry(
+      translate(
+        'auto.components.settings.experimental.search.promptFirstComposer.title',
+        'Start new workspaces from a prompt'
       )
     ),
     ephemeralVms: findEntry(

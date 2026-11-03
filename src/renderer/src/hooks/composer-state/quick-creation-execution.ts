@@ -8,6 +8,7 @@ import { isWorkspaceStatusAllowedOnHost } from '@/store/host-workspace-status-co
 import { settleComposerSubmit } from '@/lib/composer-submit-cancellation'
 import { runBackgroundWorktreeCreation } from '@/lib/worktree-creation-flow'
 import type { ComposerCreateHandoff } from '@/lib/composer-create-handoff'
+import { getComposerCreationOptions } from '@/lib/composer-create-handoff'
 import { translate } from '@/i18n/i18n'
 import { prepareQuickComposerStartup } from './quick-startup-plan'
 import { buildQuickCreationRequest, type QuickSubmitOptions } from './quick-creation-request'
@@ -99,6 +100,7 @@ export function useQuickCreationExecution(input: QuickCreationExecutionInput) {
         agent,
         linkedWorkItem: submitLinkedWorkItem,
         note: trimmedNote,
+        typedPrompt: options?.typedPrompt,
         settings,
         launchHost: selectedRepoAgentLaunchFact,
         shell: selectedRepoStartupShell,
@@ -238,11 +240,8 @@ export function useQuickCreationExecution(input: QuickCreationExecutionInput) {
         clearNewWorkspaceDraft()
       }
 
-      if (handoff) {
-        handoff.start(request)
-      } else {
-        runBackgroundWorktreeCreation(request)
-      }
+      const startCreation = handoff?.start ?? runBackgroundWorktreeCreation
+      startCreation(request, getComposerCreationOptions(createMultiple, settings))
 
       // The composer already closed at handoff; closing again could dismiss a newer modal.
       if (handoff?.isHandedOff()) {

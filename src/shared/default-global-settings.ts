@@ -140,6 +140,7 @@ export function buildDefaultSettings(args: {
     agentDefaultSurface: 'terminal',
     nativeChatResumeWorkOnRestart: false,
     nativeChatQueueFollowUps: true,
+    promptFirstComposer: false,
     nativeChatAutoContinueAfterUsageLimit: false,
     nativeChatInlineVisuals: true,
     nativeChatLinkPreviews: true,
