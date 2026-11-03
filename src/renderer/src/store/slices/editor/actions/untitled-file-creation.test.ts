@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createStore } from 'zustand/vanilla'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../../../shared/constants'
 import { makeState } from '../../workspace-cleanup-slice-test-harness'
 import { makeWorktree } from '../../worktrees-slice-test-fixtures'
 import { createPluginNewFileActions } from './untitled-file-creation'
-import type { EditorSet } from '../types/editor-set-get'
 import type { AppState } from '../../../types'
 import type { createUntitledMarkdownFile } from '@/lib/create-untitled-markdown'
 
@@ -60,7 +60,8 @@ function setup(activeWorktreeId: string | null = 'main-workspace') {
       makeWorktree({ id: 'main-workspace', repoId: 'repo', path: '/repo' }),
     openFile
   })
-  return { openFile, actions: createPluginNewFileActions(vi.fn<EditorSet>(), () => state) }
+  const store = createStore<AppState>(() => state)
+  return { openFile, state, actions: createPluginNewFileActions(store.setState, store.getState) }
 }
 
 beforeEach(() => {
@@ -72,6 +73,7 @@ beforeEach(() => {
     relativePath: 'untitled.orca-todo',
     worktreeId,
     language: 'plaintext',
+    isUntitled: true,
     mode: 'edit'
   }))
   vi.stubGlobal('window', {
@@ -107,6 +109,19 @@ describe('plugin new-file destination', () => {
       expect.objectContaining({ targetGroupId: 'floating-group' })
     )
   })
+
+  it.each(['main-workspace', null])(
+    'creates the first floating file before a tab group exists, with active workspace %s',
+    async (activeWorktreeId) => {
+      const { actions, openFile, state } = setup(activeWorktreeId)
+      state.groupsByWorktree = {}
+      await actions.openNewPluginFileInActiveWorkspace(newFile, FLOATING_TERMINAL_WORKTREE_ID)
+      expect(openFile).toHaveBeenCalledWith(
+        expect.objectContaining({ worktreeId: FLOATING_TERMINAL_WORKTREE_ID }),
+        { preview: false, targetGroupId: undefined, suppressActiveRuntimeFallback: true }
+      )
+    }
+  )
 
   it('continues opening main-menu files in the active main workspace', async () => {
     const { actions, openFile } = setup()

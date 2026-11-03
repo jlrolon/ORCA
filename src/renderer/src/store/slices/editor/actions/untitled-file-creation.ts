@@ -85,9 +85,11 @@ async function openSeededUntitledFile(
   readContent: () => Promise<string>,
   groupId?: string
 ): Promise<boolean> {
-  const floatingGroup = groupId
-    ? get().groupsByWorktree[FLOATING_TERMINAL_WORKTREE_ID]?.some((group) => group.id === groupId)
-    : false
+  const floatingGroup =
+    groupId === FLOATING_TERMINAL_WORKTREE_ID ||
+    (groupId
+      ? get().groupsByWorktree[FLOATING_TERMINAL_WORKTREE_ID]?.some((group) => group.id === groupId)
+      : false)
   if (floatingGroup) {
     try {
       const directory = await window.api.app.getFloatingMarkdownDirectory()
@@ -100,7 +102,7 @@ async function openSeededUntitledFile(
       )
       get().openFile(fileInfo, {
         preview: false,
-        targetGroupId: groupId,
+        targetGroupId: groupId === FLOATING_TERMINAL_WORKTREE_ID ? undefined : groupId,
         suppressActiveRuntimeFallback: true
       })
       return true
