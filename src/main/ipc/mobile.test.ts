@@ -301,7 +301,8 @@ describe('registerMobileHandlers', () => {
       pairingUrl: 'orca://pair#mobile',
       endpoint: 'ws://100.102.47.57:6768',
       deviceId: 'mobile-1',
-      connectionMode: 'automatic'
+      connectionMode: 'automatic',
+      offerExpiresAt: 1_000
     })
     const rpcServer = { createMobilePairingOffer }
 
@@ -313,14 +314,16 @@ describe('registerMobileHandlers', () => {
       pairingUrl: 'orca://pair#mobile',
       endpoint: 'ws://100.102.47.57:6768',
       deviceId: 'mobile-1',
-      connectionMode: 'automatic'
+      connectionMode: 'automatic',
+      expiresAt: 1_000
     })
 
     expect(createMobilePairingOffer).toHaveBeenCalledWith({
       address: '100.102.47.57',
       connectionMode: undefined,
       rotate: undefined,
-      name: expect.stringMatching(/^Mobile /)
+      name: expect.stringMatching(/^Mobile /),
+      offerTtlMs: 10 * 60_000
     })
   })
 
@@ -446,7 +449,8 @@ describe('registerMobileHandlers', () => {
       pairingUrl: 'orca://pair#runtime',
       webClientUrl: 'http://100.64.1.20:6768/web-index.html?pairing=runtime',
       endpoint: 'ws://100.64.1.20:6768',
-      deviceId: 'runtime-1'
+      deviceId: 'runtime-1',
+      offerExpiresAt: 2_000
     })
     const ensureNetworkExposure = vi.fn().mockResolvedValue(undefined)
     const rpcServer = { createPairingOffer, ensureNetworkExposure }
@@ -463,7 +467,8 @@ describe('registerMobileHandlers', () => {
       pairingUrl: 'orca://pair#runtime',
       webClientUrl: 'http://100.64.1.20:6768/web-index.html?pairing=runtime',
       endpoint: 'ws://100.64.1.20:6768',
-      deviceId: 'runtime-1'
+      deviceId: 'runtime-1',
+      expiresAt: 2_000
     })
 
     expect(createPairingOffer).toHaveBeenCalledWith({
@@ -471,7 +476,8 @@ describe('registerMobileHandlers', () => {
       rotate: true,
       name: expect.stringMatching(/^Runtime /),
       scope: 'runtime',
-      reach: 'network'
+      reach: 'network',
+      offerTtlMs: 60 * 60_000
     })
     // Widen before minting the offer so clients cannot race an unbound LAN endpoint (STA-2370).
     expect(ensureNetworkExposure).toHaveBeenCalled()

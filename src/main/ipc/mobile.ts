@@ -15,6 +15,10 @@ import { resolveAdvertisedPairingHostname } from '../runtime/pairing-endpoint'
 import type { OrcaRuntimeRpcServer } from '../runtime/runtime-rpc'
 import type { MobileRelayStatusDetail } from '../../shared/mobile-relay-status'
 import { encodeMobilePairingQr, type MobilePairingQrResult } from '../runtime/mobile-pairing-qr'
+import {
+  MOBILE_PAIRING_OFFER_TTL_MS,
+  RUNTIME_PAIRING_OFFER_TTL_MS
+} from '../runtime/pairing-offer-expiry'
 import { getWindowsDefaultRouteInterfaceNames } from '../runtime/windows-default-route-interfaces'
 import {
   getWebSocketPort,
@@ -104,7 +108,8 @@ export function registerMobileHandlers(
         address: ip,
         connectionMode: args?.connectionMode,
         rotate: args?.rotate,
-        name: `Mobile ${new Date().toLocaleDateString()}`
+        name: `Mobile ${new Date().toLocaleDateString()}`,
+        offerTtlMs: MOBILE_PAIRING_OFFER_TTL_MS
       })
       if (!offer.available) {
         // Preserve relay mint failures instead of silently presenting a LAN offer under the Relay label.
@@ -127,7 +132,8 @@ export function registerMobileHandlers(
         // Unadvertised loopback fallback points at the scanning device; omit it from UI endpoints.
         endpoint: ip ? offer.endpoint : null,
         deviceId: offer.deviceId,
-        connectionMode: offer.connectionMode
+        connectionMode: offer.connectionMode,
+        expiresAt: offer.offerExpiresAt
       }
     }
   )
@@ -171,7 +177,8 @@ export function registerMobileHandlers(
         name: `Runtime ${new Date().toLocaleDateString()}`,
         scope: 'runtime',
         // Persist local reach so local authentication cannot expose the next launch to the LAN.
-        reach: thisComputerOnly ? 'this-computer' : 'network'
+        reach: thisComputerOnly ? 'this-computer' : 'network',
+        offerTtlMs: RUNTIME_PAIRING_OFFER_TTL_MS
       })
       if (!offer.available) {
         return { available: false as const }
@@ -182,7 +189,8 @@ export function registerMobileHandlers(
         pairingUrl: offer.pairingUrl,
         webClientUrl: offer.webClientUrl,
         endpoint: offer.endpoint,
-        deviceId: offer.deviceId
+        deviceId: offer.deviceId,
+        expiresAt: offer.offerExpiresAt
       }
     }
   )
