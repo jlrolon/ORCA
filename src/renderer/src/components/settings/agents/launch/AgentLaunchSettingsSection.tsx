@@ -4,7 +4,6 @@ import { getAgentLabel } from '@/lib/agent-catalog'
 import type { TuiAgent } from '../../../../../../shared/tui-agent'
 import type { AgentPostPasteSubmitInput } from '../../../../../../shared/tui-agent-post-paste-submit'
 import { wholeAgentEnvironmentUpdates } from '../../../../../../shared/agent-launch-permission-updates'
-import { useRef } from 'react'
 import { useAppStore } from '@/store/index'
 import {
   agentLaunchSettingsMutationUpdates,
