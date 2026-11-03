@@ -4,11 +4,12 @@ description: >-
   Run work in separate Orca worker agents and get their results back. Use when
   the user asks for Orca workers or supervision (monitor, task DAGs, ask/reply,
   decision gates), when the work needs a different agent or its own Orca
-  workspace ("have Codex review this and report back" means an Orca worker of
-  that agent, even when you have your own subagents), or when you are a
-  dispatched worker (a prompt with Task and Dispatch IDs). Otherwise prefer your
-  own subagents, even for long or parallel work. Hand-offs with nothing expected
-  back, and terminal and worktree control, belong to `orca-cli`.
+  workspace, or when you are a dispatched worker (a prompt with Task and
+  Dispatch IDs). "Have Codex (or Claude) review this and report back" means an
+  Orca worker of that agent, even when you have your own subagents. Otherwise
+  prefer your own subagents, even for long or parallel work. Hand-offs with
+  nothing expected back, and terminal and worktree control, belong to
+  `orca-cli`.
 ---
 
 # Orca orchestration
