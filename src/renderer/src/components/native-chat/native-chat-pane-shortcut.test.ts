@@ -2,8 +2,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { KeybindingInput } from '../../../../shared/keybindings'
 import { handleNativeChatPaneShortcut } from './native-chat-pane-shortcut'
 
-const cmdShiftEqual = { key: '=', code: 'Equal', metaKey: true, shiftKey: true }
-const equalizeOnCmdShiftEqual = { 'terminal.equalizePaneSizes': ['Mod+Shift+Equal'] }
+// US-layout Cmd+Shift+= types '+', so Settings records it as Mod+Shift+Plus.
+const cmdShiftEqual = { key: '+', code: 'Equal', metaKey: true, shiftKey: true }
+const equalizeOnCmdShiftEqual = { 'terminal.equalizePaneSizes': ['Mod+Shift+Plus'] }
 
 function keyDown(input: KeybindingInput & { repeat?: boolean }) {
   return { repeat: false, ...input, preventDefault: vi.fn(), stopPropagation: vi.fn() }
