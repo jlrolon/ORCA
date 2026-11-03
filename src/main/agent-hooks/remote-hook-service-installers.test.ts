@@ -1,4 +1,7 @@
 import { tokenizeCommandLine } from '../../shared/agent-command-line-entrypoint'
+import { qoderHookService } from '../qoder/hook-service'
+import { dshHookService } from '../dsh/hook-service'
+import { codebuddyHookService } from '../codebuddy/hook-service'
 import { describe, expect, it, vi } from 'vitest'
 import { parse as parseJsonc } from 'jsonc-parser'
 import type { SFTPWrapper } from 'ssh2'
@@ -10,26 +13,31 @@ vi.mock('electron', () => ({
   }
 }))
 
-import { CodexHookService } from '../codex/hook-service'
-import { DroidHookService } from '../droid/hook-service'
-import { CursorHookService } from '../cursor/hook-service'
+import { CodexHookService, codexHookService } from '../codex/hook-service'
+import { DroidHookService, droidHookService } from '../droid/hook-service'
+import { CursorHookService, cursorHookService } from '../cursor/hook-service'
 import { CURSOR_EVENTS, type CursorEvent } from '../cursor/hook-events'
-import { CommandCodeHookService } from '../command-code/hook-service'
-import { GeminiHookService } from '../gemini/hook-service'
-import { AntigravityHookService } from '../antigravity/hook-service'
-import { AmpHookService } from '../amp/hook-service'
+import { CommandCodeHookService, commandCodeHookService } from '../command-code/hook-service'
+import { GeminiHookService, geminiHookService } from '../gemini/hook-service'
+import { AntigravityHookService, antigravityHookService } from '../antigravity/hook-service'
+import { AmpHookService, ampHookService } from '../amp/hook-service'
 import { ClaudeHookService, claudeHookService } from '../claude/hook-service'
-import { GrokHookService } from '../grok/hook-service'
-import { CopilotHookService } from '../copilot/hook-service'
-import { HermesHookService } from '../hermes/hook-service'
-import { DevinHookService } from '../devin/hook-service'
-import { KimiHookService } from '../kimi/hook-service'
-import { JcodeHookService } from '../jcode/hook-service'
+import { GrokHookService, grokHookService } from '../grok/hook-service'
+import { CopilotHookService, copilotHookService } from '../copilot/hook-service'
+import { HermesHookService, hermesHookService } from '../hermes/hook-service'
+import { DevinHookService, devinHookService } from '../devin/hook-service'
+import { JunieHookService, junieHookService } from '../junie/hook-service'
+import { JcodeHookService, jcodeHookService } from '../jcode/hook-service'
+import { KimiHookService, kimiHookService } from '../kimi/hook-service'
+import { museHookService } from '../muse/hook-service'
 import { openClaudeHookService } from '../openclaude/hook-service'
+import { zcodeHookService } from '../zcode/hook-service'
+import { MANAGED_AGENT_HOOK_INSTALLERS } from './managed-agent-hook-registry'
 import {
   installRemoteManagedAgentHooks,
   REMOTE_MANAGED_HOOK_INSTALLER_AGENTS
 } from './remote-managed-hook-installers'
+import { createFakeSftp } from './fake-sftp.test-fixtures'
 
 const EXPECTED_CURSOR_HOOK_RESPONSES = {
   beforeSubmitPrompt: '{"continue":true}',
@@ -41,20 +49,6 @@ const EXPECTED_CURSOR_HOOK_RESPONSES = {
   beforeMCPExecution: '{"permission":"allow"}',
   afterAgentResponse: '{}'
 } satisfies Record<CursorEvent, string>
-
-function createFakeSftp(initialFiles: Record<string, string> = {}) {
-  const { sftp, fs } = createAgentHookMemorySftp(initialFiles)
-  const failRenameTo = new Set<string>()
-  const rename = sftp.rename.bind(sftp)
-  sftp.rename = (source, destination, callback) => {
-    if (failRenameTo.has(destination)) {
-      callback(Object.assign(new Error(`rename failed ${destination}`), { code: 4 }))
-      return
-    }
-    rename(source, destination, callback)
-  }
-  return { sftp, fs: { ...fs, failRenameTo } }
-}
 
 describe('remote hook service installers', () => {
   it('always writes POSIX scripts for SSH remotes even from a Windows host', async () => {
@@ -415,6 +409,21 @@ describe('remote hook service installers', () => {
     expect(script).toContain('--data-urlencode "grokHome=${grok_home}"')
   })
 
+  it('installs remote Junie hooks in the explicit guest JUNIE_HOME', async () => {
+    const customJunieHome = '/srv/junie profile'
+    const { sftp, fs } = createFakeSftp()
+
+    const status = await new JunieHookService().installRemote(sftp, '/home/dev', {
+      junieHomeDir: customJunieHome
+    })
+
+    expect(status.state).toBe('installed')
+    expect(status.configPath).toBe(`${customJunieHome}/config.json`)
+    expect(fs.files.has(`${customJunieHome}/config.json`)).toBe(true)
+    expect(fs.files.has('/home/dev/.junie/config.json')).toBe(false)
+    expect(fs.files.get('/home/dev/.orca/agent-hooks/junie-hook.sh')).toContain('/hook/junie')
+  })
+
   it.each(['relative/grok', '/bad\\grok', `/${'x'.repeat(4096)}`])(
     'falls back to login-home Grok config for invalid remote home %s',
     async (remoteGrokHome) => {
@@ -576,6 +585,142 @@ describe('remote hook service installers', () => {
       (definition.hooks ?? []).map((hook) => hook.command)
     )
     expect(beforeToolCommands.some((command) => command.includes('gemini-hook.sh'))).toBe(true)
+  })
+
+  it('installs remote Copilot hooks under the user-level hooks directory', async () => {
+    const { sftp, fs } = createFakeSftp()
+    fs.dirs.add('/home/dev/.copilot')
+    fs.dirs.add('/home/dev/.copilot/hooks')
+    fs.files.set(
+      '/home/dev/.copilot/hooks/orca.json',
+      JSON.stringify({
+        version: 99,
+        disableAllHooks: true,
+        hooks: {}
+      })
+    )
+
+    const status = await new CopilotHookService().installRemote(sftp, '/home/dev/')
+
+    expect(status.state).toBe('installed')
+    expect(status.configPath).toBe('/home/dev/.copilot/hooks/orca.json')
+    const config = JSON.parse(fs.files.get('/home/dev/.copilot/hooks/orca.json')!) as {
+      version: number
+      disableAllHooks?: boolean
+      hooks: Record<string, { bash?: string; timeoutSec?: number }[]>
+    }
+    expect(config.version).toBe(1)
+    for (const eventName of [
+      'SessionStart',
+      'SessionEnd',
+      'UserPromptSubmit',
+      'PreToolUse',
+      'PostToolUse',
+      'PostToolUseFailure',
+      'subagentStart',
+      'SubagentStop',
+      'PreCompact',
+      'Stop',
+      'ErrorOccurred',
+      'PermissionRequest',
+      'Notification'
+    ]) {
+      const definition = config.hooks[eventName]?.[0]
+      expect(definition?.bash).toContain('/home/dev/.orca/agent-hooks/copilot-hook.sh')
+      expect(definition?.bash).toContain(`ORCA_COPILOT_HOOK_EVENT='${eventName}'`)
+      expect(definition?.timeoutSec).toBe(5)
+    }
+    expect(config.disableAllHooks).toBeUndefined()
+    expect(fs.files.get('/home/dev/.orca/agent-hooks/copilot-hook.sh')).toContain('#!/bin/sh')
+    expect(fs.modes.get('/home/dev/.orca/agent-hooks/copilot-hook.sh')).toBe(0o755)
+  })
+
+  it('installs Qoder on the execution host with its own event endpoint', async () => {
+    const { sftp, fs } = createFakeSftp()
+    const result = await qoderHookService.installRemote(sftp, '/home/dev/')
+    expect(result.state).toBe('installed')
+    expect(result.configPath).toBe('/home/dev/.qoder/settings.json')
+    const settings = JSON.parse(fs.files.get(result.configPath) ?? '{}')
+    expect(settings.hooks.SessionEnd).toHaveLength(1)
+    expect(settings.hooks.Notification).toHaveLength(1)
+    expect(settings.hooks.TeammateIdle).toBeUndefined()
+    expect(fs.files.get('/home/dev/.orca/agent-hooks/qoder-hook.sh')).toContain('/hook/qoder')
+  })
+
+  // Why: Droid (and Copilot) each shipped a working installRemote but were never
+  // registered in REMOTE_MANAGED_HOOK_INSTALLERS, so their status silently never
+  // appeared over SSH (issue #7253). Guard the whole bug class, not one agent:
+  // every locally-managed hook service that implements installRemote MUST be
+  // wired into the remote installer.
+  it('registers every managed agent that implements installRemote in the remote installer (issue #7253)', () => {
+    const servicesByAgent = new Map<string, { installRemote?: unknown }>([
+      ['claude', claudeHookService],
+      ['openclaude', openClaudeHookService],
+      ['codex', codexHookService],
+      ['gemini', geminiHookService],
+      ['qoder', qoderHookService],
+      ['codebuddy', codebuddyHookService],
+      ['antigravity', antigravityHookService],
+      ['amp', ampHookService],
+      ['cursor', cursorHookService],
+      ['droid', droidHookService],
+      ['command-code', commandCodeHookService],
+      ['grok', grokHookService],
+      ['copilot', copilotHookService],
+      ['hermes', hermesHookService],
+      ['devin', devinHookService],
+      ['kimi', kimiHookService],
+      ['muse', museHookService],
+      ['zcode', zcodeHookService],
+      ['dsh', dshHookService],
+      ['jcode', jcodeHookService],
+      ['junie', junieHookService]
+    ])
+
+    // Guard against a service silently missing from the map above as new agents land.
+    for (const [agent] of MANAGED_AGENT_HOOK_INSTALLERS) {
+      expect(servicesByAgent.has(agent)).toBe(true)
+    }
+
+    const registered = new Set<string>(REMOTE_MANAGED_HOOK_INSTALLER_AGENTS)
+    const missing: string[] = []
+    for (const [agent, service] of servicesByAgent) {
+      if (typeof service.installRemote === 'function' && !registered.has(agent)) {
+        missing.push(agent)
+      }
+    }
+    expect(missing).toEqual([])
+  })
+
+  it('installs Droid and Copilot when running the aggregate remote installer (issue #7253)', async () => {
+    const { sftp, fs } = createFakeSftp()
+    const results = await installRemoteManagedAgentHooks(sftp, '/home/dev', {
+      agents: REMOTE_MANAGED_HOOK_INSTALLER_AGENTS
+    })
+    const byAgent = new Map(results.map((r) => [r.agent, r.state]))
+    expect(byAgent.get('droid')).toBe('installed')
+    expect(byAgent.get('copilot')).toBe('installed')
+    expect(JSON.parse(fs.files.get('/home/dev/.factory/settings.json') ?? '{}')).toMatchObject({
+      hooks: {
+        Stop: [
+          {
+            hooks: [
+              { command: expect.stringContaining('/home/dev/.orca/agent-hooks/droid-hook.sh') }
+            ]
+          }
+        ]
+      }
+    })
+    expect(JSON.parse(fs.files.get('/home/dev/.copilot/hooks/orca.json') ?? '{}')).toMatchObject({
+      hooks: {
+        Stop: [{ bash: expect.stringContaining('/home/dev/.orca/agent-hooks/copilot-hook.sh') }]
+      }
+    })
+    for (const agent of ['droid', 'copilot']) {
+      const path = `/home/dev/.orca/agent-hooks/${agent}-hook.sh`
+      expect(fs.files.get(path)).toContain(`/hook/${agent}`)
+      expect(fs.modes.get(path)).toBe(0o755)
+    }
   })
 
   it('installs only positively detected remote agents', async () => {
