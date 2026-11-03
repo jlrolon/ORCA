@@ -9,6 +9,8 @@ export type ResumeEscapeChunk = {
   /** True when `data` is the whole delivered chunk or an exact raw suffix, so startSeq is trustworthy. */
   mappable: boolean
   gapEscapeState: string | undefined
+  /** Escape a seq cut through the delivered chunk left open where `data` starts; '' or absent when none. */
+  cutEscape?: string
 }
 
 export type ResumeEscapeParserState = {
@@ -64,7 +66,9 @@ export class TerminalResumeEscapeGap {
       return chunk.data
     }
     if (startSeq === parser.paintedSeq) {
-      const open = skipCarry || abortedEscape
+      // A snapshot that cut mid-escape and re-armed none leaves the parser at ground before the escape's tail (#33766).
+      const open =
+        skipCarry || abortedEscape || (parser.parserEscape ? '' : (chunk.cutEscape ?? ''))
       return open ? this.skip(open, chunk.data) : chunk.data
     }
     // A parser already holding the label's prefix (replay tail, sentinel) completes the escape instead.
