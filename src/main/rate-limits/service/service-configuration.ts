@@ -76,6 +76,16 @@ export abstract class RateLimitServiceConfiguration extends RateLimitServiceAcco
     this.inactiveClaudeAccountsGeneration += 1
   }
 
+  /** Maps a normalized `CLAUDE_CONFIG_DIR` to the managed account whose folder it is, or null. */
+  setLiveClaudeAccountResolver(resolver: (configDir: string) => string | null): void {
+    this.liveClaudeAccountResolver = resolver
+  }
+
+  /** Answers whether System Default signs for the given managed account. */
+  setClaudeSystemDefaultCoverageResolver(resolver: (accountId: string) => boolean): void {
+    this.claudeSystemDefaultCoverageResolver = resolver
+  }
+
   setInactiveCodexAccountsResolver(resolver: () => InactiveCodexAccountInfo[]): void {
     this.inactiveCodexAccountsResolver = resolver
     this.inactiveCodexAccountsGeneration += 1
@@ -110,7 +120,8 @@ export abstract class RateLimitServiceConfiguration extends RateLimitServiceAcco
     this.detachWindowListeners = detachWindowListeners
   }
 
-  start(options: { fetchImmediately?: boolean } = {}): void {
+  start(options: { fetchImmediately?: boolean; pollWithoutWindow?: boolean } = {}): void {
+    this.pollWithoutWindow = options.pollWithoutWindow === true
     if (options.fetchImmediately !== false) {
       void this.fetchAll()
     } else {
@@ -120,6 +131,7 @@ export abstract class RateLimitServiceConfiguration extends RateLimitServiceAcco
   }
 
   stop(): void {
+    this.pollWithoutWindow = false
     this.abortActiveFetchCycle()
     this.clearQueuedFetches()
     this.inactiveClaudeFetching.clear()
