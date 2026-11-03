@@ -18,6 +18,7 @@ import {
   type GeminiCliOAuthEnabledResolver,
   type NormalizedCodexAccountSelectionTarget,
   type NormalizedClaudeAccountSelectionTarget,
+  type ActiveClaudeUsageAccount,
   type InactiveClaudeAccountInfo,
   type NetworkProxySettings,
   DEFAULT_POLL_MS
@@ -41,6 +42,9 @@ export abstract class RateLimitServiceState {
   // Async Keychain/desktop DB probing belongs in fetch cycles, never synchronous construction.
   protected cursorAuthConfigured = false
   protected openCodeGoApiKeyConfigured = false
+  protected pollWithoutWindow = false
+  /** Headless hosts have no usage panel. The same timer fills inactive-account windows. */
+  protected pollInactiveClaude = false
   protected pollInterval: number = DEFAULT_POLL_MS
   protected timer: ReturnType<typeof setInterval> | null = null
   protected deferredStartupRefreshTimer: ReturnType<typeof setTimeout> | null = null
@@ -111,6 +115,11 @@ export abstract class RateLimitServiceState {
   protected geminiCliOAuthEnabledResolver: GeminiCliOAuthEnabledResolver | null = null
   protected antigravityUsageEnabledResolver: AntigravityUsageEnabledResolver | null = null
   protected inactiveClaudeAccountsResolver: (() => InactiveClaudeAccountInfo[]) | null = null
+  protected activeClaudeUsageAccountResolver: (() => ActiveClaudeUsageAccount | null) | null = null
+  // Why: statusline posts name a folder, not an account; the account layer answers which managed account owns it.
+  protected liveClaudeAccountResolver: ((configDir: string) => string | null) | null = null
+  // Why: a billed post on System Default names an account the user folder covers; only the router knows which ones.
+  protected claudeSystemDefaultCoverageResolver: ((accountId: string) => boolean) | null = null
   protected inactiveCodexAccountsResolver: (() => InactiveCodexAccountInfo[]) | null = null
   protected networkProxySettingsResolver: (() => NetworkProxySettings) | null = null
   protected inactiveClaudeCache = new Map<string, ProviderRateLimits>()

@@ -23,6 +23,7 @@ import {
 import { isRecoveryReloadInFlight } from './main-window-lifecycle-flags'
 import { RELAY_HOST_CLOSE_REASON } from '../../shared/relay-host-close-reason'
 import { holdLaunchReconnectOptOuts } from '../ipc/ssh/ssh-host-user-disconnect'
+import { armServeClaudeUsagePolling } from './serve-claude-usage-polling'
 
 export function attachMainWindowCoreServices(
   window: BrowserWindow,
@@ -161,6 +162,21 @@ export function attachMainWindowCoreServices(
   // Attach durable diagnostic pulls now, defer process launch past first paint.
   initTccPromptNotice(window, { deferWatchUntilReadyToShow: true })
   rateLimits.attach(window)
+  if (state.isServeMode) {
+    // A window opened after serve launch must not call desktop start() and clear the headless flags.
+    if (armServeClaudeUsagePolling()) {
+      const stop = state.stopClaudeUsagePolling
+      window.on('closed', () => {
+        if (stop && state.stopClaudeUsagePolling === stop) {
+          stop()
+        }
+      })
+    }
+    return
+  }
+  console.info(
+    '[claude-usage] polling switch: mode=desktop pollInactive=false pollWithoutWindow=false'
+  )
   // Quota probes spawn CLIs/use network; defer to show/focus refresh so they do not compete with first paint.
   rateLimits.start({ fetchImmediately: false })
 }
