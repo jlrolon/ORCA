@@ -42,6 +42,8 @@ import {
 } from './InlineProviderUsage'
 import { AccountSwitchList } from './AccountSwitchList'
 import { AccountSwitchRowItem } from './AccountSwitchRowItem'
+import { Badge } from '@/components/ui/badge'
+import { claudeSessionCountLabel } from '@/components/tab-bar/ClaudePaneAccountBadge'
 import { ProviderDetailsMenu } from './ProviderDetailsMenu'
 import { signInToClaudeAccount } from '@/lib/claude-account-sign-in'
 
@@ -278,6 +280,11 @@ export function ClaudeSwitcherForOwner({
     >
       <AccountSwitchList
         heading={translate('auto.components.status.bar.StatusBar.d450654fa2', 'Claude Account')}
+        badge={
+          accounts.pool === 'on' ? (
+            <Badge variant="hostContext">{translate('accounts.claude.pool.badge', 'Pool')}</Badge>
+          ) : undefined
+        }
       >
         {selectedGroup?.targets.length === 0 ? (
           <div className="px-2 py-1.5 text-2xs text-muted-foreground">
@@ -290,6 +297,9 @@ export function ClaudeSwitcherForOwner({
             : null
           // Why local only: the hidden sign-in runs on this device, not a remote server.
           const signInId = target.needsSignIn && !hasActiveRuntimeEnvironment ? target.id : null
+          const sessionCount = target.id
+            ? (accounts.assignedSessions?.find((row) => row.accountId === target.id)?.count ?? 0)
+            : 0
 
           return (
             <AccountSwitchRowItem
@@ -326,6 +336,11 @@ export function ClaudeSwitcherForOwner({
                 <div className="flex w-full flex-col gap-0.5">
                   {target.hint ? (
                     <span className="text-3xs leading-4 text-muted-foreground">{target.hint}</span>
+                  ) : null}
+                  {sessionCount > 0 ? (
+                    <span className="text-3xs leading-4 text-muted-foreground">
+                      {claudeSessionCountLabel(sessionCount)}
+                    </span>
                   ) : null}
                   {inactiveUsage?.isFetching && !inactiveUsage.rateLimits ? (
                     <InlineUsageSkeleton />
