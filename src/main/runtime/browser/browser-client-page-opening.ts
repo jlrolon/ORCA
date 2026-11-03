@@ -34,6 +34,7 @@ export type BrowserClientPageCreateParams = {
   activate?: boolean
   navigation?: RuntimeNavigationTarget
   targetGroupId?: string
+  chromeless?: boolean
   placement: { kind: 'client'; browserHostClientId: string }
 }
 
@@ -44,6 +45,7 @@ export const DEFAULT_BROWSER_PROFILE_ID = 'default'
 export const BROWSER_HOST_UNAVAILABLE_MESSAGE =
   "No paired Orca desktop is hosting browser pages for this server. On a desktop paired with it, open a browser tab in one of this server's workspaces, then retry. The desktop needs an Orca version that hosts this server's pages."
 
+/** Create a paired client's page with an initial toolbar hint; later toolbar choices belong to each view. */
 export async function createBrowserClientPage(
   host: BrowserClientPageOpeningHost,
   params: BrowserClientPageCreateParams,
@@ -93,7 +95,8 @@ export async function createBrowserClientPage(
     pairedDeviceId: caller.pairedDeviceId,
     url: 'about:blank',
     loading: url !== 'about:blank',
-    active: focus.startsActive
+    active: focus.startsActive,
+    ...(params.chromeless !== undefined ? { chromeless: params.chromeless } : {})
   })
   publishCreatedBrowserSessionTab(host, {
     placementKind: 'client',
