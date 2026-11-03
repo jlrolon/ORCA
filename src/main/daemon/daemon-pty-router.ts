@@ -270,7 +270,7 @@ export class DaemonPtyRouter implements IPtyProvider {
     return this.current.serialize(ids)
   }
 
-  async revive(state: string): Promise<void> {
+  revive(state: string): Promise<void> {
     return this.current.revive(state)
   }
 
@@ -297,33 +297,28 @@ export class DaemonPtyRouter implements IPtyProvider {
     })
   }
 
-  async getDefaultShell(): Promise<string> {
+  getDefaultShell(): Promise<string> {
     return this.current.getDefaultShell()
   }
 
-  async getProfiles(): Promise<{ name: string; path: string }[]> {
+  getProfiles(): Promise<{ name: string; path: string }[]> {
     return this.current.getProfiles()
   }
 
-  onData(callback: (payload: DaemonPtyRouterDataEvent) => void): () => void {
-    return this.legacyDrain.fanout.onData(callback)
-  }
+  onData = (callback: (payload: DaemonPtyRouterDataEvent) => void): (() => void) =>
+    this.legacyDrain.fanout.onData(callback)
 
-  onBackgroundStreamEvent(callback: (payload: PtyBackgroundStreamEvent) => void): () => void {
-    return this.legacyDrain.fanout.onBackgroundStreamEvent(callback)
-  }
+  onBackgroundStreamEvent = (callback: (payload: PtyBackgroundStreamEvent) => void): (() => void) =>
+    this.legacyDrain.fanout.onBackgroundStreamEvent(callback)
 
-  onWriteUnavailable(callback: (payload: { id: string }) => void): () => void {
-    return this.legacyDrain.fanout.onWriteUnavailable(callback)
-  }
+  onWriteUnavailable = (callback: (payload: { id: string }) => void): (() => void) =>
+    this.legacyDrain.fanout.onWriteUnavailable(callback)
 
-  onReplay(callback: (payload: { id: string; data: string }) => void): () => void {
-    return this.legacyDrain.fanout.onReplay(callback)
-  }
+  onReplay = (callback: (payload: { id: string; data: string }) => void): (() => void) =>
+    this.legacyDrain.fanout.onReplay(callback)
 
-  onExit(callback: (payload: DaemonPtyRouterExitEvent) => void): () => void {
-    return this.legacyDrain.fanout.onExit(callback)
-  }
+  onExit = (callback: (payload: DaemonPtyRouterExitEvent) => void): (() => void) =>
+    this.legacyDrain.fanout.onExit(callback)
 
   /** Cold-restore acknowledgement must reach the owning generation's history. */
   ackColdRestore(sessionId: string): void {
@@ -358,7 +353,8 @@ export class DaemonPtyRouter implements IPtyProvider {
 
   disconnectOnly(): Promise<void> {
     this.legacyDrain.fanout.dispose()
-    return Promise.all([...this.allAdapters()].map((adapter) => adapter.disconnectOnly()))
+    const all = [...this.allAdapters()]
+    return Promise.all(all.map((adapter) => adapter.disconnectOnly())).then(() => undefined)
   }
 
   getCurrentAdapter(): DaemonPtyAdapter {
@@ -370,9 +366,7 @@ export class DaemonPtyRouter implements IPtyProvider {
     return this.legacy
   }
 
-  getAllAdapters(): readonly DaemonPtyAdapter[] {
-    return this.allAdapters()
-  }
+  getAllAdapters = this.allAdapters
 
   private adapterFor(sessionId: string): DaemonPtyAdapter {
     return this.sessionAdapters.get(sessionId) ?? this.current
