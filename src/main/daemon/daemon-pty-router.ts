@@ -43,7 +43,7 @@ export class DaemonPtyRouter implements IPtyProvider {
         adapter.shareSessionListingWith(() => this.allAdapters())
       }
     }
-    // A proven-gone provider owns nothing; the resolver drops it and the router detaches its socket.
+    // A proven-gone provider owns nothing; the resolver drops it, the router detaches its socket.
     const onProvenGone = (a: DaemonPtyAdapter, e: unknown) =>
       this.retireExitedLegacy(a, e) !== 'not-exited'
     this.ownerResolver = new DaemonSessionOwnerResolver(
@@ -266,13 +266,9 @@ export class DaemonPtyRouter implements IPtyProvider {
     return (await this.adapterFor(id).confirmShellForeground?.(id)) ?? false
   }
 
-  serialize(ids: string[]): Promise<string> {
-    return this.current.serialize(ids)
-  }
+  serialize = (ids: string[]): Promise<string> => this.current.serialize(ids)
 
-  revive(state: string): Promise<void> {
-    return this.current.revive(state)
-  }
+  revive = (state: string): Promise<void> => this.current.revive(state)
 
   /** Aggregates every generation's PTYs; a legacy adapter whose endpoint provably died detaches here. */
   async listProcesses(opts?: Parameters<IPtyProvider['listProcesses']>[0]) {
@@ -366,7 +362,9 @@ export class DaemonPtyRouter implements IPtyProvider {
     return this.legacy
   }
 
-  getAllAdapters = this.allAdapters
+  getAllAdapters(): readonly DaemonPtyAdapter[] {
+    return this.allAdapters()
+  }
 
   private adapterFor(sessionId: string): DaemonPtyAdapter {
     return this.sessionAdapters.get(sessionId) ?? this.current
