@@ -1,7 +1,7 @@
 import { translateMain } from '../i18n/main-i18n'
 import { ipcMain, shell, dialog } from 'electron'
-import { constants, copyFile, readFile, stat } from 'node:fs/promises'
-import { basename, extname, isAbsolute, normalize, posix, win32 } from 'node:path'
+import { readFile, stat } from 'node:fs/promises'
+import { basename, extname, posix, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type {
   ShellOpenExternalEditorRequest,
@@ -297,18 +297,4 @@ export function registerShellHandlers(
     }
     return result.filePaths[0]
   })
-
-  // Relative image links keep Markdown small and portable.
-  ipcMain.handle(
-    'shell:copyFile',
-    async (_event, args: { srcPath: string; destPath: string }): Promise<void> => {
-      const src = normalize(args.srcPath)
-      const dest = normalize(args.destPath)
-      if (!isAbsolute(src) || !isAbsolute(dest)) {
-        throw new Error('Both source and destination must be absolute paths')
-      }
-      // Reject name collisions even if renderer deconfliction missed one; never overwrite existing data.
-      await copyFile(src, dest, constants.COPYFILE_EXCL)
-    }
-  )
 }

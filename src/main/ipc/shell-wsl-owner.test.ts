@@ -18,8 +18,6 @@ vi.mock('electron', () => ({
 }))
 
 vi.mock('node:fs/promises', () => ({
-  constants: { COPYFILE_EXCL: 1 },
-  copyFile: vi.fn(),
   readFile: vi.fn(),
   stat: statMock
 }))
