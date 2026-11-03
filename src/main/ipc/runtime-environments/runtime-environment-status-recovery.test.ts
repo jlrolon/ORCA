@@ -7,21 +7,12 @@ import { addEnvironmentFromPairingCode } from '../../../shared/runtime-environme
 import { pairingCode } from './runtime-environments-ipc-test-harness'
 import { getRuntimeEnvironmentStatus } from './runtime-environment-status-probe'
 import { resetSharedControlSupport } from './runtime-environment-shared-control-support'
+import { setRuntimeDesktopSurface } from '../../runtime/runtime-desktop-surface'
 
 const { request, publish } = vi.hoisted(() => ({ request: vi.fn(), publish: vi.fn() }))
 vi.mock('../../../shared/remote-runtime/remote-runtime-client', () => ({
   sendRemoteRuntimeRequest: request,
   subscribeRemoteRuntimeRequest: vi.fn()
-}))
-vi.mock('electron', () => ({
-  BrowserWindow: {
-    getAllWindows: () => [
-      {
-        isDestroyed: () => false,
-        webContents: { send: publish }
-      }
-    ]
-  }
 }))
 
 let profile: string
@@ -29,10 +20,18 @@ beforeEach(() => {
   vi.useFakeTimers()
   request.mockReset()
   publish.mockReset()
+  setRuntimeDesktopSurface({
+    showNotification: () => false,
+    sendToRenderers: publish,
+    findWindowById: () => null,
+    onIpc: () => {},
+    removeIpcListener: () => {}
+  })
   profile = mkdtempSync(join(tmpdir(), 'orca-status-recovery-'))
 })
 afterEach(() => {
   resetSharedControlSupport()
+  setRuntimeDesktopSurface(null)
   vi.useRealTimers()
   rmSync(profile, { recursive: true, force: true })
 })

@@ -31,7 +31,7 @@ const {
       museUsage: {},
       codexAccounts: {},
       claudeAccounts: {},
-      rateLimits: { attach: vi.fn(), start: vi.fn() },
+      rateLimits: { attach: vi.fn() },
       automations: { setWebContents: vi.fn(), start: vi.fn() },
       keybindings: {},
       codexRuntimeHome: {},
