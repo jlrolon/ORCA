@@ -99,6 +99,9 @@ beforeEach(() => {
           apiKeyProtection: null
         }))
       },
+      ollamaCloudCredentials: {
+        getStatus: vi.fn(async () => ({ apiKeyConfigured: false, apiKeyProtection: null }))
+      },
       codexConfigSync: {
         status: vi.fn(async () => ({
           state: 'synced',
