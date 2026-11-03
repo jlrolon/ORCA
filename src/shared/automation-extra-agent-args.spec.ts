@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { mergeExtraAgentArgs, parseExtraAgentArgs } from './automation-extra-agent-args'
+import {
+  getExtraAgentArgsPlaceholder,
+  mergeExtraAgentArgs,
+  parseExtraAgentArgs,
+  supportsExtraAgentArgs
+} from './automation-extra-agent-args'
+import { assertAutomationExtraAgentArgs } from './automation-extra-agent-args-record'
 import { buildAgentStartupPlan } from './tui-agent-startup'
 import { tokenizeStartupCommand, type AgentStartupShell } from './tui-agent-startup-shell'
 import type { TuiAgent } from './tui-agent'
@@ -27,6 +33,21 @@ function rejection(agent: TuiAgent, extraAgentArgs: string) {
 }
 
 describe('mergeExtraAgentArgs', () => {
+  it('enables Pi extras for fresh sessions', () => {
+    const automation = {
+      agentId: 'pi' as const,
+      extraAgentArgs: '--model provider/model --thinking high',
+      reuseSession: false,
+      surface: 'terminal' as const
+    }
+    expect(supportsExtraAgentArgs('pi')).toBe(true)
+    expect(getExtraAgentArgsPlaceholder('pi')).toBe('--model model-id --thinking high')
+    expect(() => assertAutomationExtraAgentArgs(automation)).not.toThrow()
+    expect(() => assertAutomationExtraAgentArgs({ ...automation, reuseSession: true })).toThrow(
+      'fresh session'
+    )
+  })
+
   it('matches the documented example', () => {
     expect(
       merged(
@@ -109,9 +130,159 @@ describe('mergeExtraAgentArgs', () => {
       '--model=grok-4.7',
       ['--reasoning-effort', 'low', '--model=grok-4.7']
     ],
-    ['omp', '--model a/b', '--model c/d', ['--model', 'c/d']]
+    ['omp', '--model a/b', '--model c/d', ['--model', 'c/d']],
+    [
+      'pi',
+      '--provider host --model old --thinking low',
+      '--model=other/model',
+      ['--thinking', 'low', '--model', 'other/model']
+    ],
+    [
+      'pi',
+      '--provider host --model old',
+      '--model bare-model',
+      ['--provider', 'host', '--model', 'bare-model']
+    ],
+    [
+      'pi',
+      '--provider host --model old',
+      '--model HOST/gateway/model',
+      ['--provider', 'host', '--model', 'HOST/gateway/model']
+    ],
+    [
+      'pi',
+      '--provider other --provider host --model old',
+      '--model other/model',
+      ['--provider', 'other', '--model', 'other/model']
+    ],
+    [
+      'pi',
+      '--provider host --model old',
+      '--thinking high',
+      ['--provider', 'host', '--model', 'old', '--thinking', 'high']
+    ],
+    [
+      'pi',
+      '--system-prompt --provider --provider host --model old -- --provider literal',
+      '--model other/model',
+      ['--system-prompt', '--provider', '--model', 'other/model', '--', '--provider', 'literal']
+    ],
+    [
+      'pi',
+      '--model old/model --thinking low',
+      '--model=new/model --thinking=max',
+      ['--model', 'new/model', '--thinking', 'max']
+    ],
+    [
+      'pi',
+      '--model old/model --thinking low',
+      '--thinking high',
+      ['--model', 'old/model', '--thinking', 'high']
+    ],
+    [
+      'pi',
+      '--system-prompt --model --model old',
+      '--model new',
+      ['--system-prompt', '--model', '--model', 'new']
+    ]
   ] as const)('%s: %s + %s', (agent, defaults, extras, expected) => {
     expect(merged(agent, defaults, extras)).toEqual(expected)
+  })
+
+  it.each(['posix', 'powershell', 'cmd'] as const)(
+    'does not forward a Pi API key to a different provider on %s',
+    (shell) => {
+      expect(
+        merged(
+          'pi',
+          '--provider anthropic --api-key "host secret" --model old',
+          '--model openai/gpt-5',
+          shell
+        )
+      ).toEqual(['--model', 'openai/gpt-5'])
+    }
+  )
+
+  it('keeps the Pi API key when the explicit provider remains in effect', () => {
+    for (const model of ['new-model', 'anthropic/new-model']) {
+      expect(
+        merged('pi', '--provider anthropic --api-key secret --model old', `--model ${model}`)
+      ).toEqual(['--provider', 'anthropic', '--api-key', 'secret', '--model', model])
+    }
+  })
+
+  it('rejects Pi model overrides when the inline key provider is unknown', () => {
+    const result = mergeExtraAgentArgs({
+      agent: 'pi',
+      defaultArgs: '--api-key host-secret --model anthropic/old',
+      extraAgentArgs: '--model openai/gpt-5',
+      shell: 'posix'
+    })
+    expect(result).toEqual({ ok: false, error: expect.stringContaining('--api-key') })
+    if (!result.ok) {
+      expect(result.error).not.toContain('host-secret')
+    }
+  })
+
+  it.each(['--provider=anthropic --api-key secret', '--provider anthropic --api-key -secret'])(
+    'rejects a Pi model override with ambiguous credentials: %s',
+    (defaultArgs) => {
+      expect(
+        mergeExtraAgentArgs({
+          agent: 'pi',
+          defaultArgs,
+          extraAgentArgs: '--model openai/gpt-5',
+          shell: 'posix'
+        })
+      ).toMatchObject({ ok: false, error: expect.stringContaining('--api-key') })
+    }
+  )
+
+  it('removes every Pi API key and dash-leading value on a provider change', () => {
+    expect(
+      merged(
+        'pi',
+        '--provider anthropic --api-key first --api-key -second --model old',
+        '--model openai/gpt-5'
+      )
+    ).toEqual(['--model', 'openai/gpt-5'])
+  })
+
+  it('keeps a Pi API key when only thinking changes', () => {
+    expect(merged('pi', '--api-key secret --thinking low', '--thinking high')).toEqual([
+      '--api-key',
+      'secret',
+      '--thinking',
+      'high'
+    ])
+  })
+
+  it('removes a Pi API key when the effective provider changes among duplicates', () => {
+    expect(
+      merged(
+        'pi',
+        '--provider openai --provider anthropic --api-key secret --model old',
+        '--model openai/gpt-5'
+      )
+    ).toEqual(['--provider', 'openai', '--model', 'openai/gpt-5'])
+  })
+
+  it('does not treat Pi API-key-like positional text as a credential', () => {
+    expect(
+      merged(
+        'pi',
+        '--system-prompt --api-key --provider old --model old -- --api-key literal',
+        '--model new/model'
+      )
+    ).toEqual([
+      '--system-prompt',
+      '--api-key',
+      '--model',
+      'new/model',
+      '--',
+      '--api-key',
+      'literal'
+    ])
   })
 
   it('keeps flag-like values of other default options', () => {
@@ -146,7 +317,10 @@ describe('mergeExtraAgentArgs', () => {
 describe('parseExtraAgentArgs rejections', () => {
   it.each([
     ['claude', 'bad\u0007', 'control characters'],
+    ['claude', '--model\u007fopus', 'control characters'],
+    ['claude', '--model\u009fopus', 'control characters'],
     ['claude', '--model\u2028opus', 'control characters'],
+    ['claude', '--model\u2029opus', 'control characters'],
     ['claude', '--model "opus', 'Unclosed quote'],
     ['claude', '--model opus; rm -rf /', 'shell syntax'],
     ['claude', '--model $(whoami)', 'shell syntax'],
@@ -179,9 +353,34 @@ describe('parseExtraAgentArgs rejections', () => {
     ['grok', '--effort low --reasoning-effort high', 'effort more than once'],
     ['grok', '--permission-mode bypassPermissions', '"--permission-mode"'],
     ['omp', '--effort high', '"--effort"'],
+    ['pi', '--thinking low --thinking high', 'effort more than once'],
+    ['pi', '--thinking bogus', '--thinking: off, minimal, low, medium, high, xhigh, max'],
+    ['pi', '--thinking=HIGH', '--thinking: off, minimal, low, medium, high, xhigh, max'],
+    ['pi', '--thinking none', '--thinking: off, minimal, low, medium, high, xhigh, max'],
+    ['pi', '--extension path', '"--extension"'],
+    ['pi', '--model x --resume', '"--resume"'],
     ['codebuddy', '--add-dir x', '"--add-dir"']
   ] as const)('%s rejects %j', (agent, extras, message) => {
     expect(rejection(agent, extras)).toContain(message)
+  })
+
+  it.each(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])(
+    'accepts Pi thinking level %s in both forms',
+    (level) => {
+      expect(rejection('pi', `--thinking ${level}`)).toBeNull()
+      expect(rejection('pi', `--thinking=${level}`)).toBeNull()
+    }
+  )
+
+  it('refuses an invalid Pi thinking override instead of dropping the host default', () => {
+    expect(
+      mergeExtraAgentArgs({
+        agent: 'pi',
+        defaultArgs: '--thinking high',
+        extraAgentArgs: '--thinking=bogus',
+        shell: 'posix'
+      })
+    ).toMatchObject({ ok: false, error: expect.stringContaining('--thinking: off, minimal') })
   })
 
   it('limits extras to 4 KiB', () => {
@@ -246,6 +445,30 @@ describe.each(['posix', 'powershell', 'cmd'] as const)('round trip on %s', (shel
         shell
       )
     ).toEqual(['--dangerously-skip-permissions', '--add-dir', 'x y', '--add-dir', token])
+  })
+
+  it('builds a Pi startup command with separate model and thinking arguments', () => {
+    const args = mergeExtraAgentArgs({
+      agent: 'pi',
+      defaultArgs: '--provider host --model old',
+      extraAgentArgs: '--model=provider/model --thinking=max',
+      shell
+    })
+    if (!args.ok) {
+      throw new Error(args.error)
+    }
+    const plan = buildAgentStartupPlan({
+      agent: 'pi',
+      prompt: 'do the thing',
+      cmdOverrides: {},
+      platform: shell === 'posix' ? 'linux' : 'win32',
+      shell,
+      agentArgs: args.agentArgs
+    })
+    expect(tokenizeStartupCommand(plan?.launchCommand ?? '', shell)).toMatchObject({
+      ok: true,
+      tokens: ['pi', '--model', 'provider/model', '--thinking', 'max', 'do the thing']
+    })
   })
 
   it('builds the startup command with extras before the prompt', () => {

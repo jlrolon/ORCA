@@ -1,4 +1,9 @@
-import { agentArgTerminatorIndex } from './agent-session/options/agent-session-option-agent-args'
+import {
+  agentArgTerminatorIndex,
+  normalizePiExtraAgentArgs,
+  reconcilePiModelDefaults,
+  removeAgentArgOption
+} from './agent-session/options/agent-session-option-agent-args'
 import { getAgentSessionOptionLaunchCatalog } from './agent-session/options/agent-session-option-catalog'
 import { findOptionOccurrence } from './command-option-occurrence'
 import {
@@ -8,6 +13,7 @@ import {
 } from './tui-agent-startup-shell'
 import type { TuiAgent } from './tui-agent'
 import { TUI_AGENT_DISPLAY_NAMES } from './tui-agent-display-names'
+import { PI_THINKING_LEVELS } from './agent-session/options/structured-agent-session-effective-effort'
 
 export const EXTRA_AGENT_ARGS_MAX_BYTES = 4096
 export const EXTRA_AGENT_ARGS_HOST_UPDATE_REQUIRED =
@@ -42,7 +48,8 @@ const EXTRA_AGENT_ARG_OPTIONS: Partial<Record<TuiAgent, readonly ExtraAgentArgOp
   // Cursor composes effort into the model id, so only the model is a flag.
   cursor: [MODEL_OR_M_OPTION],
   grok: [MODEL_OR_M_OPTION, { kind: 'effort', aliases: ['--effort', '--reasoning-effort'] }],
-  omp: [MODEL_OPTION]
+  omp: [MODEL_OPTION],
+  pi: [MODEL_OPTION, { kind: 'effort', aliases: ['--thinking'] }]
 }
 
 export function supportsExtraAgentArgs(agent: TuiAgent): boolean {
@@ -65,16 +72,7 @@ export function getExtraAgentArgsPlaceholder(agent: TuiAgent): string {
     .join(' ')
 }
 
-// C0, DEL, C1, and the Unicode line/paragraph separators.
-function hasControlCharacter(value: string): boolean {
-  for (const char of value) {
-    const code = char.codePointAt(0) ?? 0
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029) {
-      return true
-    }
-  }
-  return false
-}
+const CONTROL_CHARACTERS = new RegExp(String.raw`[\u0000-\u001f\u007f-\u009f\u2028\u2029]`, 'u')
 
 // One English table: `error` stays English for older readers; the renderer translates by code.
 export const EXTRA_AGENT_ARGS_FAILURE_COPY = {
@@ -167,7 +165,7 @@ export function parseExtraAgentArgs(args: {
   if (new TextEncoder().encode(args.extraAgentArgs).length > EXTRA_AGENT_ARGS_MAX_BYTES) {
     return extraAgentArgsFailure('tooLarge')
   }
-  if (hasControlCharacter(args.extraAgentArgs)) {
+  if (CONTROL_CHARACTERS.test(args.extraAgentArgs)) {
     return extraAgentArgsFailure('controlCharacters')
   }
   const text = args.extraAgentArgs.trim()
@@ -208,6 +206,11 @@ export function parseExtraAgentArgs(args: {
       return extraAgentArgsFailure('missingValue', { option: name })
     }
     const { kind, valuePrefix } = match.option
+    if (args.agent === 'pi' && kind === 'effort' && !PI_THINKING_LEVELS.includes(value)) {
+      return extraAgentArgsFailure('invalid', {
+        detail: `--thinking: ${PI_THINKING_LEVELS.join(', ')}`
+      })
+    }
     if (valuePrefix && (!value.startsWith(valuePrefix) || value.length === valuePrefix.length)) {
       return extraAgentArgsFailure('valueNotAllowed', {
         option: name,
@@ -222,14 +225,35 @@ export function parseExtraAgentArgs(args: {
     kinds.add(kind)
     index += match.consumed - 1
   }
-  return { ok: true, tokens, kinds }
+  return {
+    ok: true,
+    tokens: args.agent === 'pi' ? normalizePiExtraAgentArgs(tokens) : tokens,
+    kinds
+  }
 }
 
+/** Remove overridden defaults, including a Pi provider that conflicts with a qualified model. */
 function removeDefaultsFor(
   agent: TuiAgent,
-  kinds: ReadonlySet<ExtraAgentArgKind>,
+  extras: Extract<ParsedExtraAgentArgs, { ok: true }>,
   tokens: readonly string[]
-): string[] {
+): string[] | null {
+  const { kinds } = extras
+  if (agent === 'pi') {
+    let result: string[] | null = [...tokens]
+    if (kinds.has('model')) {
+      result = removeAgentArgOption(agent, result, ['--model'])
+      const model = findOptionOccurrence(extras.tokens, ['--model'], false)?.value
+      result = reconcilePiModelDefaults(result, model)
+      if (!result) {
+        return null
+      }
+    }
+    if (kinds.has('effort')) {
+      result = removeAgentArgOption(agent, result, ['--thinking'])
+    }
+    return result
+  }
   const catalog = getAgentSessionOptionLaunchCatalog(agent)
   let result = [...tokens]
   if (!catalog) {
@@ -284,7 +308,13 @@ export function mergeParsedExtraAgentArgs(args: {
   if (!defaults.ok) {
     return { ok: false, error: `Default agent arguments are invalid: ${defaults.error}` }
   }
-  const kept = removeDefaultsFor(args.agent, extras.kinds, defaults.tokens)
+  const kept = removeDefaultsFor(args.agent, extras, defaults.tokens)
+  if (!kept) {
+    return {
+      ok: false,
+      error: 'Pi model overrides require an explicit --provider and valid --api-key value.'
+    }
+  }
   const terminator = agentArgTerminatorIndex(args.agent, kept)
   const merged = [...kept.slice(0, terminator), ...extras.tokens, ...kept.slice(terminator)]
   const agentArgs = merged.map((token) => quoteStartupArg(token, args.shell)).join(' ')
