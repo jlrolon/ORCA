@@ -49,7 +49,9 @@ import {
   AddClaudeFromConfigDirParams,
   AddCodexFromHomeParams,
   AddDataAccountParams,
+  AssignClaudePaneParams,
   BeginClaudeSignInParams,
+  ClaudeAuthProxyStatusParams,
   ConsumeCodexResetCreditParams,
   FinishClaudeSignInParams,
   HostAccountSignInCodeParams,
@@ -62,7 +64,9 @@ import {
   SelectAccountParams,
   SelectClaudeAccountParams,
   SelectCodexAccountForTargetParams,
-  SelectDataAccountParams
+  SelectDataAccountParams,
+  SetClaudeAuthProxyParams,
+  SetClaudeAutoSwitchParams
 } from './accounts-params'
 import { PrepareCodexForWslPaneParams } from './agent-hooks-params'
 import { AgentLaunch, AgentLaunchReplay } from './agent-launch-params'
@@ -749,8 +753,10 @@ export const RPC_PARAMS_BY_METHOD = {
   'accounts.antigravityList': AntigravityAccountTargetParams,
   'accounts.antigravityRemove': AntigravityAccountMutationParams,
   'accounts.antigravitySelect': AntigravityAccountMutationParams,
+  'accounts.assignClaudePane': AssignClaudePaneParams,
   'accounts.beginClaudeSignIn': BeginClaudeSignInParams,
   'accounts.cancelClaudeSignIn': FinishClaudeSignInParams,
+  'accounts.claudeAuthProxyStatus': ClaudeAuthProxyStatusParams,
   'accounts.consumeCodexResetCredit': ConsumeCodexResetCreditParams,
   'accounts.finishClaudeSignIn': FinishClaudeSignInParams,
   'accounts.hostSignInCancel': HostAccountSignInFlowParams,
@@ -771,6 +777,8 @@ export const RPC_PARAMS_BY_METHOD = {
   'accounts.selectCodex': SelectAccountParams,
   'accounts.selectCodexForTarget': SelectCodexAccountForTargetParams,
   'accounts.selectData': SelectDataAccountParams,
+  'accounts.setClaudeAuthProxy': SetClaudeAuthProxyParams,
+  'accounts.setClaudeAutoSwitch': SetClaudeAutoSwitchParams,
   'accounts.setHostLaunchEnv': HostAccountLaunchEnvParams,
   'accounts.subscribe': null,
   'accounts.unsubscribe': AccountsUnsubscribeParams,
