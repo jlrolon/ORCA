@@ -3,6 +3,7 @@ import type {
   NativeChatTranscriptFrame,
   NativeChatTranscriptPage
 } from '../../../../shared/native-chat/native-chat-transcript-frames'
+import { NATIVE_CHAT_TERMINAL_QUEUE_METHODS } from './native-chat-terminal-queue'
 import { resolveNativeChatTranscriptAgent } from '../../../../shared/native-chat/native-chat-agent-support'
 import {
   readNativeChatTranscriptTail,
@@ -94,6 +95,7 @@ function resumeIndex(
 }
 
 export const NATIVE_CHAT_METHODS = [
+  ...NATIVE_CHAT_TERMINAL_QUEUE_METHODS,
   defineMethod({
     name: 'nativeChat.readSession',
     permission: 'workspace',
