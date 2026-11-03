@@ -1,3 +1,4 @@
+import { isOnDeviceTextGenerationId } from '../../../../../shared/on-device-text-generation'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { GlobalSettings } from '../../../../../shared/global-settings-types'
@@ -179,7 +180,8 @@ export function ChatNamingSetting({
         operation: 'conversationName'
       })
     : null
-  const cliAgent = cliRecipe?.ok ? cliRecipe.value.params.agentId : null
+  const cliAgentId = cliRecipe?.ok ? cliRecipe.value.params.agentId : null
+  const cliAgent = cliAgentId && !isOnDeviceTextGenerationId(cliAgentId) ? cliAgentId : null
   const defaultAgentLabel = cliAgent
     ? translate('settings.chat.names.configuredCliAgent', 'Use configured CLI agent ({{agent}})', {
         agent:
