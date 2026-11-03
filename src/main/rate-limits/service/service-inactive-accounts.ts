@@ -1,27 +1,65 @@
 import { fetchManagedAccountUsage } from '../claude-fetcher'
+import { beginClaudeOAuthRefreshCycle } from '../claude-oauth-refresh'
+import { orderInactiveClaudeRefreshAccounts } from '../claude-oauth-refresh-state'
 import { fetchCodexRateLimits } from '../codex-fetcher'
-import { RateLimitServicePolling } from './service-polling'
+import { makeClaudeUsageResult } from '../claude-usage-result'
+import {
+  inactiveClaudeThrownFailureKind,
+  RateLimitServiceSelectedClaudeUsage
+} from './service-selected-claude-usage'
 import { INACTIVE_CODEX_PROBE_STAGGER_MS, INACTIVE_FETCH_DEBOUNCE_MS } from './service-types'
 import { delayUnlessAborted } from '../../../shared/abort-aware-delay'
+import type { ProviderRateLimits } from '../../../shared/rate-limit-types'
 
-export abstract class RateLimitServiceInactiveAccounts extends RateLimitServicePolling {
+export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceSelectedClaudeUsage {
+  protected override afterBackgroundFetch(): void {
+    if (!this.pollInactiveClaude) {
+      return
+    }
+    void this.fetchInactiveClaudeAccountsOnOpen()
+  }
+
   async fetchInactiveClaudeAccountsOnOpen(): Promise<void> {
     if (Date.now() - this.lastInactiveClaudeFetchAt < INACTIVE_FETCH_DEBOUNCE_MS) {
+      console.info('[claude-usage] inactive fetch skipped reason=debounce')
       return
     }
     this.pruneInactiveClaudeState()
     if (this.inactiveClaudeFetching.size > 0) {
+      console.info('[claude-usage] inactive fetch skipped reason=in-flight')
+      return
+    }
+    if (!this.inactiveClaudeAccountsResolver && !this.activeClaudeUsageAccountResolver) {
+      console.info('[claude-usage] inactive fetch skipped reason=not-attached')
       return
     }
     const accounts = (this.inactiveClaudeAccountsResolver?.() ?? []).filter(
       (account) => !this.isRetryAfterActive(this.inactiveClaudeCache.get(account.id) ?? null)
     )
-    if (accounts.length === 0) {
+    const selected = this.selectedHostUsageAccount(accounts)
+    if (selected.omission) {
+      console.info(
+        `[claude-usage] inactive fetch skipped reason=${selected.omission.reason} account=${selected.omission.accountId}`
+      )
+    }
+    const activeAccount = selected.account
+    const count = accounts.length + (activeAccount ? 1 : 0)
+    if (count === 0) {
+      if (!selected.omission) {
+        console.info('[claude-usage] inactive fetch skipped reason=no-accounts')
+      }
+      console.info('[claude-usage] inactive fetch start n=0')
+      console.info('[claude-usage] inactive fetch done n=0 ok=0 failed=0')
       return
     }
+    console.info(`[claude-usage] inactive fetch start n=${count}`)
+    beginClaudeOAuthRefreshCycle()
+    const orderedAccounts = orderInactiveClaudeRefreshAccounts(accounts, activeAccount)
     const fetchGeneration = this.inactiveClaudeAccountsGeneration
     const controller = this.beginFetchCycle()
     const signal = controller.signal
+    let ok = 0
+    let failed = 0
 
     for (const account of accounts) {
       this.inactiveClaudeFetching.add(account.id)
@@ -29,7 +67,7 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
     this.pushToRenderer()
 
     try {
-      for (const account of accounts) {
+      for (const account of orderedAccounts) {
         if (
           signal.aborted ||
           fetchGeneration !== this.inactiveClaudeAccountsGeneration ||
@@ -60,9 +98,12 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
             this.pushToRenderer()
             continue
           }
-          const cached = this.inactiveClaudeCache.get(account.id) ?? null
-          this.inactiveClaudeCache.set(account.id, this.applyStalePolicy(fresh, cached))
-        } catch {
+          if (this.noteInactiveClaudeFetch(account.id, fresh)) {
+            ok += 1
+          } else {
+            failed += 1
+          }
+        } catch (error) {
           // Isolate each account's Keychain/network failure so siblings continue.
           if (
             signal.aborted ||
@@ -70,10 +111,27 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
             !this.isCurrentInactiveClaudeAccount(account.id)
           ) {
             this.inactiveClaudeCache.delete(account.id)
+          } else {
+            this.noteInactiveClaudeFetch(
+              account.id,
+              makeClaudeUsageResult('error', 'Claude usage is unavailable.', {
+                failureKind: inactiveClaudeThrownFailureKind(error)
+              })
+            )
+            failed += 1
           }
         }
         this.inactiveClaudeFetching.delete(account.id)
         this.pushToRenderer()
+      }
+
+      if (activeAccount && !signal.aborted) {
+        const outcome = await this.fetchSelectedClaudeUsage(activeAccount, signal)
+        if (outcome === 'ok') {
+          ok += 1
+        } else if (outcome === 'failed') {
+          failed += 1
+        }
       }
 
       if (!signal.aborted && fetchGeneration === this.inactiveClaudeAccountsGeneration) {
@@ -81,7 +139,22 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
       }
     } finally {
       this.finishFetchCycle(controller)
+      console.info(`[claude-usage] inactive fetch done n=${count} ok=${ok} failed=${failed}`)
     }
+  }
+
+  private noteInactiveClaudeFetch(accountId: string, fresh: ProviderRateLimits): boolean {
+    const stored = this.applyStalePolicy(fresh, this.inactiveClaudeCache.get(accountId) ?? null)
+    this.inactiveClaudeCache.set(accountId, stored)
+    if (stored.status === 'ok') {
+      return true
+    }
+    const kind = stored.usageMetadata?.failureKind ?? 'unknown'
+    const http = stored.usageMetadata?.httpStatus
+    console.info(
+      `[claude-usage] inactive fetch account=${accountId} failure=${kind}${http ? ` http=${http}` : ''}`
+    )
+    return false
   }
 
   async fetchInactiveCodexAccountsOnOpen(): Promise<void> {

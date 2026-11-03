@@ -27,9 +27,12 @@ export abstract class RateLimitServicePolling extends RateLimitServiceFetchQueue
       if (!this.shouldBackgroundPoll()) {
         return
       }
-      void this.fetchAll()
+      void this.fetchAll().finally(() => this.afterBackgroundFetch())
     }, this.pollInterval)
   }
+
+  /** Subclasses read inactive accounts after the active cycle so the two fetches do not overlap. */
+  protected afterBackgroundFetch(): void {}
 
   protected stopTimer(): void {
     if (this.timer) {
@@ -54,6 +57,10 @@ export abstract class RateLimitServicePolling extends RateLimitServiceFetchQueue
   }
 
   protected shouldBackgroundPoll(): boolean {
+    // Headless serve attaches a hidden window. The opt-in still has to poll; desktop start omits it.
+    if (this.pollWithoutWindow) {
+      return true
+    }
     if (!this.mainWindow || this.mainWindow.isDestroyed()) {
       return false
     }
