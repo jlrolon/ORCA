@@ -319,6 +319,7 @@ describe('workspace linked work editor', () => {
     }
     useAppStore.setState({ folderWorkspaces: [folder] })
     openDialog({}, { worktreeId: folderWorkspaceKey(folder.id), repoId: undefined })
+    expect(screen.queryByLabelText('Link')).toBeNull()
     await add('STA-5', 'Linear task')
     await save()
     expect(updateWorktreeMeta.mock.calls[0]?.[0]).toBe(folderWorkspaceKey(folder.id))
