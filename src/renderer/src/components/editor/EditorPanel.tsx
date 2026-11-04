@@ -9,6 +9,7 @@ import { getEditorHeaderCopyState } from './editor-header'
 import { getRuntimeTargetForFileOwner } from '@/lib/file-owner-runtime-target'
 import { exportActiveMarkdownToPdf } from './export-active-markdown'
 import type { EditorToggleValue } from './view-mode/EditorViewToggle'
+import { EditorViewCommands } from './EditorViewCommands'
 import { EditorPanelShell } from './EditorPanelShell'
 import { DiffNavigationProvider } from './diff/review/diff-navigation-context'
 import { EditorCommandOwnerContext } from './editor-command-owner-context'
@@ -33,7 +34,7 @@ import { useEditorPanelSave } from './save/commands/useEditorPanelSave'
 import { isMarkdownReviewNotesEnabled } from '@/lib/markdown-review-notes-setting'
 import { useFileCustomEditors } from '@/store/plugin-custom-editors'
 import { applyCustomEditorToggle } from './view-mode/custom-editor-toggle'
-import { runAfterEditorFramesFlush } from './save/flush/editor-pending-flush'
+import { useEditorViewSwitch } from './useEditorViewSwitch'
 
 function EditorPanelInner({
   activeFileId: activeFileIdProp,
@@ -91,6 +92,8 @@ function EditorPanelInner({
   const customEditors = useFileCustomEditors(activeFileId, activeFile?.filePath)
   const markdownReviewNotesEnabled = useAppStore((s) => isMarkdownReviewNotesEnabled(s.settings))
   const panelRef = useRef<HTMLDivElement>(null)
+  const viewSwitch = useEditorViewSwitch(activeFile, activeViewStateId)
+
   const [copiedPathToast, setCopiedPathToast] = useState<{ fileId: string; token: number } | null>(
     null
   )
@@ -240,9 +243,8 @@ function EditorPanelInner({
   })
 
   const handleOpenPreviewToSide = (): void => {
-    const state = useAppStore.getState()
     const sourceGroupId = activeViewStateId
-      ? ((state.unifiedTabsByWorktree[activeFile.worktreeId] ?? []).find(
+      ? ((useAppStore.getState().unifiedTabsByWorktree[activeFile.worktreeId] ?? []).find(
           (t) => t.id === activeViewStateId
         )?.groupId ?? null)
       : null
@@ -270,13 +272,10 @@ function EditorPanelInner({
       setMarkdownViewMode(openedFileId, preferredMarkdownViewMode)
     }
   }
-  const handleEditorToggleChange = (next: EditorToggleValue): void => {
-    // Why: leaving a custom editor unmounts its frame, which may still hold debounced edits.
-    runAfterEditorFramesFlush(useAppStore.getState(), [activeFile.id], () =>
-      applyEditorToggle(next)
-    )
-  }
   const applyEditorToggle = (next: EditorToggleValue): void => {
+    if (!model.availableEditorToggleModes.includes(next)) {
+      return
+    }
     const fileId = activeFile.id
     if (activeFile.mode === 'diff' && model.isMarkdown && next === 'rich') {
       handleOpenDiffTargetFile('rich')
@@ -292,7 +291,8 @@ function EditorPanelInner({
       setMarkdownViewMode(fileId, markdownMode)
     }
   }
-  const handleOpenMarkdownPreview = (): void => {
+  viewSwitch.applyRef.current = applyEditorToggle
+  const handleOpenMarkdownPreview = (): void =>
     openMarkdownPreview(
       {
         filePath: activeFile.filePath,
@@ -303,7 +303,6 @@ function EditorPanelInner({
       },
       { sourceFileId: activeFile.id }
     )
-  }
   const disableRenameBrowse = Boolean(
     renameDialogFileOffClient ||
     (renameDialogFile ? getConnectionId(renameDialogFile.worktreeId) : null)
@@ -347,6 +346,15 @@ function EditorPanelInner({
 
   return (
     <EditorCommandOwnerContext value={isCmdSaveOwner}>
+      <EditorViewCommands
+        key={viewSwitch.ownerKey}
+        ownerKey={viewSwitch.ownerKey}
+        enabled={isVisible && isCmdSaveOwner && model.hasEditorToggle && !activeFile.csvPreviewOnly}
+        panelRef={panelRef}
+        value={model.effectiveToggleValue}
+        modes={model.availableEditorToggleModes}
+        onChange={viewSwitch.handleChange}
+      />
       {/* Split panes need independent bridges between diff editors and header controls. */}
       <DiffNavigationProvider>
         <EditorPanelShell
@@ -372,7 +380,7 @@ function EditorPanelInner({
           onOpenPreviewToSide={handleOpenPreviewToSide}
           onOpenMarkdownPreview={handleOpenMarkdownPreview}
           onToggleSideBySide={() => setSideBySide((prev) => !prev)}
-          onEditorToggleChange={handleEditorToggleChange}
+          onEditorToggleChange={viewSwitch.handleChange}
           onToggleMarkdownTableOfContents={() =>
             setMarkdownTableOfContentsVisible(
               markdownDocumentStateFileId,
