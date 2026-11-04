@@ -176,7 +176,20 @@ function formatTerminalReadLimitedWarning(terminal: RuntimeTerminalRead): string
   return 'warning: output limited'
 }
 
+/**
+ * Render a `terminal send` result for a human.
+ *
+ * A refusal is spelled out rather than printed as `Sent 0 bytes`: a `'pending-input'` refusal
+ * quotes the draft that is in the way and says to wait for the user, so the sender neither
+ * retries blindly nor mistakes the refusal for delivery.
+ */
 export function formatTerminalSend(result: { send: RuntimeTerminalSend }): string {
+  if (result.send.refusedReason === 'pending-input') {
+    return [
+      `Refused: terminal ${result.send.handle} has unsent input in its composer: ${JSON.stringify(result.send.pendingInput ?? '')}`,
+      'Wait for the user to send or clear it.'
+    ].join('\n')
+  }
   if (!result.send.accepted) {
     const reason = result.send.refusedReason ? `: ${result.send.refusedReason}` : ''
     return `Input refused by ${result.send.handle}${reason}.`

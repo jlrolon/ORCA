@@ -4,6 +4,7 @@ import { InvalidArgumentError, defineMethod } from '../../core'
 import { isTerminalQueryReply } from '../../../../../shared/terminal/protocol/queries/terminal-query-reply'
 import { isUntypedTerminalInput } from '../../../../../shared/terminal/input/terminal-untyped-input'
 import { assertTerminalAgentSendable } from '../../terminal-agent-send-guard'
+import { AgentPromptPendingInputError } from '../../../terminal/input/agent-prompt-permission-hold'
 import { TerminalSend } from '../../../../../shared/rpc-contract/terminal-unary-params'
 import type { RuntimeTerminalSend } from '../../../../../shared/runtime-terminal-send-contract'
 import {
@@ -27,13 +28,27 @@ import {
   withTerminalInputSequence
 } from './terminal-send-input-sequence'
 
-// Every refused send reports the same zero-byte result, with the guard's reason when it has one.
+/**
+ * Build the one shape every refused send reports: zero bytes written, never accepted.
+ *
+ * @param refusedReason The guard's reason, when it has one.
+ * @param pendingInput The unsent composer text, carried only by a `'pending-input'` refusal so
+ * the sender can tell the user what is in the way. Both are omitted rather than sent as
+ * `undefined`, keeping the wire additive for older clients.
+ */
 function refusedSend(
   handle: string,
-  refusedReason?: NonNullable<ReturnType<typeof getTerminalSendGuardRefusedReason>>
+  refusedReason?: NonNullable<RuntimeTerminalSend['refusedReason']>,
+  pendingInput?: string
 ) {
   return {
-    send: { handle, accepted: false, bytesWritten: 0, ...(refusedReason ? { refusedReason } : {}) }
+    send: {
+      handle,
+      accepted: false,
+      bytesWritten: 0,
+      ...(refusedReason ? { refusedReason } : {}),
+      ...(pendingInput === undefined ? {} : { pendingInput })
+    }
   }
 }
 
@@ -252,6 +267,9 @@ export const TERMINAL_SEND_METHODS = [
           mobileFloorClaim.current?.rollback()
           if (acceptedPromptCheckpoint) {
             return acceptedPromptCheckpoint
+          }
+          if (error instanceof AgentPromptPendingInputError) {
+            return refusedSend(params.terminal, 'pending-input', error.pendingInput)
           }
           const refusedReason = getTerminalSendGuardRefusedReason(error)
           if (refusedReason) {
