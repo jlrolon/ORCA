@@ -28,6 +28,7 @@ import { MobileSessionTab } from './MobileSessionTab'
 import type { SessionTitleCard } from './use-session-title-card'
 
 const DOUBLE_TAP_RENAME_MS = 300
+export const SESSION_TAB_DOUBLE_TAP_MS = DOUBLE_TAP_RENAME_MS
 
 export const MobileSessionTabStrip = memo(function MobileSessionTabStrip({
   controller,
