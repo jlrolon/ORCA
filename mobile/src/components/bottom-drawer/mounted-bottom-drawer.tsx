@@ -45,7 +45,12 @@ export type MountedBottomDrawerProps = {
   dragContentToDismiss?: boolean
   contentScrollable?: boolean
   fillAvailable?: boolean
-  // Pinned-under sheet preserves size but must not receive touches, backdrop or keyboard lift.
+  // Why: a content-sized prompt can open while the IME is already up, so no
+  // new onShow fires. Opt in to seed the current height; default stays off so
+  // outer sheets do not inherit a stale height after an inner dismiss.
+  seedKeyboard?: boolean
+  // Why: outer sheets pinned under an inner fill picker stay laid out (size
+  // preserved) but must not take touches, stack backdrops, or keyboard-lift.
   interactive?: boolean
   /** False holds the sheet up while it works: Back, the backdrop and drags leave it in place. */
   dismissible?: boolean
@@ -62,6 +67,7 @@ export function MountedBottomDrawer({
   dragContentToDismiss = true,
   contentScrollable = true,
   fillAvailable = false,
+  seedKeyboard = false,
   interactive = true,
   dismissible = true,
   zIndex = 1000,
@@ -152,8 +158,12 @@ export function MountedBottomDrawer({
       }
     }
 
-    // Seed fill sheets (autoFocus may precede listeners) and page sheets (focus moving under an open IME sends no event); native content sheets own a Modal window, where stale metrics would stick.
-    if (fillAvailable || Platform.OS === 'web') {
+    // Why: autoFocus can raise the keyboard before listeners attach, and an
+    // already-open IME fires no new onShow. Fill sheets always seed; a
+    // content-sized sheet seeds only when it opts in. Page sheets on web seed
+    // because focus moving under an open IME sends no event; native content
+    // sheets own a Modal window, where stale metrics would stick.
+    if (fillAvailable || seedKeyboard || Platform.OS === 'web') {
       const existing = currentSoftKeyboardHeight()
       if (existing > 0) {
         applyKeyboardHeight(existing)
@@ -175,7 +185,7 @@ export function MountedBottomDrawer({
       keyboardOffset.value = 0
       setKeyboardInset(0)
     }
-  }, [visible, interactive, insets.bottom, fillAvailable])
+  }, [visible, interactive, insets.bottom, fillAvailable, seedKeyboard])
 
   const dismiss = useCallback(() => {
     // Never restart hide mid-close: cancellation prevents onHidden and leaves invisible Modal swallowing taps (Android Back).
