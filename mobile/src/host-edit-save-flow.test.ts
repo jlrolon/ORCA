@@ -34,13 +34,19 @@ vi.mock('expo-router', () => ({
 }))
 
 vi.mock('lucide-react-native', () => ({
-  ChevronLeft: 'ChevronLeft'
+  ChevronLeft: 'ChevronLeft',
+  Save: 'Save'
 }))
 
 vi.mock('./transport/host-store', () => ({
   loadHosts: dependencies.loadHosts,
   updateHostNameAndEndpoint: dependencies.updateHostNameAndEndpoint
 }))
+
+vi.mock(
+  './settings/settings-screen-frame',
+  async () => (await import('./test-support/settings-chrome-test-double')).settingsFrameDouble
+)
 
 vi.mock('./transport/host-client-hooks', () => ({
   usePrimeHosts: () => dependencies.primeHosts,
@@ -275,7 +281,7 @@ describe('edit host handleSave', () => {
     setFieldValue(renderer, 'Address', '192.168.1.20:6768')
     await pressSave(renderer)
     act(() => {
-      renderer.root.findByProps({ accessibilityLabel: 'Back' }).props.onPress()
+      renderer.root.find((node) => String(node.type) === 'SettingsNavBar').props.onBack()
       renderer.unmount()
     })
     expect(dependencies.back).toHaveBeenCalledTimes(1)

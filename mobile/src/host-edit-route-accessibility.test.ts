@@ -34,13 +34,19 @@ vi.mock('expo-router', () => ({
 }))
 
 vi.mock('lucide-react-native', () => ({
-  ChevronLeft: 'ChevronLeft'
+  ChevronLeft: 'ChevronLeft',
+  Save: 'Save'
 }))
 
 vi.mock('./transport/host-store', () => ({
   loadHosts: dependencies.loadHosts,
   updateHostNameAndEndpoint: dependencies.updateHostNameAndEndpoint
 }))
+
+vi.mock(
+  './settings/settings-screen-frame',
+  async () => (await import('./test-support/settings-chrome-test-double')).settingsFrameDouble
+)
 
 vi.mock('./transport/host-client-hooks', () => ({
   usePrimeHosts: () => dependencies.primeHosts,

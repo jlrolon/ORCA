@@ -10,8 +10,10 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { ChevronLeft } from 'lucide-react-native'
 import { colors, radii, spacing, typography, pressedStyle } from '../../../src/theme/mobile-theme'
+import { Save } from 'lucide-react-native'
+import { NavBarButton } from '../../../src/components/nav-bar/NavBarButton'
+import { SettingsNavBar } from '../../../src/settings/settings-screen-frame'
 import { themedStyleSheet } from '../../../src/theme/themed-styles'
 import { useMobileColorScheme } from '../../../src/theme/use-mobile-color-scheme'
 import { loadHosts, updateHostNameAndEndpoint } from '../../../src/transport/host-store'
@@ -170,34 +172,19 @@ export default function EditHostScreen() {
   }
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top + spacing.sm }]}>
-      <View style={styles.topRow}>
-        <Pressable
-          style={({ pressed }) => [styles.backButton, pressed && pressedStyle]}
-          onPress={leave}
-          accessibilityRole="button"
-          accessibilityLabel={t('common.back', 'Back')}
-        >
-          <ChevronLeft size={22} color={colors.textSecondary} />
-        </Pressable>
-        <Text style={styles.heading}>{t('host.edit.title', 'Edit host')}</Text>
-        <Pressable
-          style={({ pressed }) => [
-            styles.saveButton,
-            (!canSave || pressed) && styles.saveButtonDisabled
-          ]}
-          onPress={() => void handleSave()}
-          disabled={!canSave}
-          accessibilityRole="button"
-          accessibilityLabel={t('host.edit.saveHost', 'Save host')}
-        >
-          {saving ? (
-            <ActivityIndicator size="small" color={colors.bgBase} />
-          ) : (
-            <Text style={styles.saveButtonText}>{t('common.save', 'Save')}</Text>
-          )}
-        </Pressable>
-      </View>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <SettingsNavBar
+        title={t('host.edit.title', 'Edit host')}
+        onBack={leave}
+        trailing={
+          <NavBarButton
+            icon={saving ? SavingIcon : Save}
+            onPress={() => void handleSave()}
+            disabled={!canSave}
+            accessibilityLabel={t('host.edit.saveHost', 'Save host')}
+          />
+        }
+      />
 
       {loadError ? (
         <View style={styles.errorState}>
@@ -290,6 +277,10 @@ export default function EditHostScreen() {
   )
 }
 
+function SavingIcon({ color }: { color?: string }) {
+  return <ActivityIndicator size="small" color={color} />
+}
+
 const styles = themedStyleSheet(() => ({
   container: {
     flex: 1,
@@ -298,44 +289,9 @@ const styles = themedStyleSheet(() => ({
   flex: {
     flex: 1
   },
-  topRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.md,
-    gap: spacing.sm
-  },
-  backButton: {
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  heading: {
-    flex: 1,
-    color: colors.textPrimary,
-    fontSize: 20,
-    fontWeight: '700'
-  },
-  saveButton: {
-    minWidth: 64,
-    height: 34,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.control,
-    backgroundColor: colors.surfaceBright,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  saveButtonDisabled: {
-    opacity: 0.4
-  },
-  saveButtonText: {
-    color: colors.bgBase,
-    fontSize: typography.bodySize,
-    fontWeight: '600'
-  },
   form: {
     paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
     gap: spacing.sm
   },
   help: {
