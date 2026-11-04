@@ -11,6 +11,7 @@ import {
 } from '../../../../shared/browser-network-tunnel-protocol'
 import {
   BROWSER_NETWORK_TUNNEL_INITIAL_WINDOW_BYTES,
+  BROWSER_NETWORK_TUNNEL_MAX_PENDING_SOCKET_CHUNKS,
   type BrowserNetworkTunnelSocket
 } from './browser-network-tunnel-stream-state'
 import { BrowserNetworkTunnelSession } from './browser-network-tunnel-session'
@@ -635,11 +636,11 @@ describe('BrowserNetworkTunnelSession', () => {
     )
     socket.emit('connect')
 
-    for (let index = 0; index < 257; index += 1) {
+    for (let index = 0; index <= BROWSER_NETWORK_TUNNEL_MAX_PENDING_SOCKET_CHUNKS; index += 1) {
       session.handleBinary(frame(BrowserNetworkTunnelOpcode.Data, new Uint8Array([index & 0xff])))
     }
 
-    expect(socket.writes).toHaveLength(256)
+    expect(socket.writes).toHaveLength(BROWSER_NETWORK_TUNNEL_MAX_PENDING_SOCKET_CHUNKS)
     expect(socket.destroyed).toBe(true)
   })
 
