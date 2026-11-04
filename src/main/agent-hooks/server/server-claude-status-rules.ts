@@ -56,7 +56,8 @@ export function withHeldChildWaitMainAgent(
 
 export function shouldKeepClaudePermissionVisible(
   previous: EnrichedAgentHookEventPayload | undefined,
-  next: AgentHookEventPayload
+  next: AgentHookEventPayload,
+  programStatusRelease?: true
 ): boolean {
   if (previous?.restoredUnconfirmed) {
     return false
@@ -68,6 +69,13 @@ export function shouldKeepClaudePermissionVisible(
     next.payload.agentType !== 'claude' ||
     next.payload.state !== 'working'
   ) {
+    return false
+  }
+  // The program's own fresh report passed the hook-silence gate (#37003): a declined permission
+  // emits no hook, so resumed program work is the answer evidence. Lease renewals never reach
+  // here — the yield gate holds them without end. A child-owned wait answers to its child's
+  // settlement below, not to pane-level program work.
+  if (programStatusRelease === true && !previous.toolAgentId?.trim()) {
     return false
   }
   if (next.hasExplicitPrompt === true) {

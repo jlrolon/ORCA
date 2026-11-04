@@ -13,7 +13,7 @@ import type { AgentHookEventPayload } from '../../../shared/agent-hook-listener/
 import { agentSubagentsEqual } from '../../../shared/agent-status/contracts/agent-status-subagent-snapshot'
 import { isAgentStatusHeldOpenByChildWork } from '../../../shared/agent-status/lifecycle/agent-lead-status-fold'
 import { AgentHookServerIngestNormalization } from './server-ingest-normalization'
-import { programStatusHookYieldEndsAt } from './program-status/hook-precedence'
+import { programStatusReportYieldEndsAt } from './program-status/hook-precedence'
 import type { ProgramStatusFacet } from '../../../shared/program-status/facet'
 
 const PROGRAM_STATUS_FACET_REPUBLISH_MS = 250
@@ -203,10 +203,7 @@ export abstract class AgentHookServerIngestTerminal extends AgentHookServerInges
       }
       return
     }
-    const yieldEndsAt =
-      event.fromProgramStatus === true
-        ? programStatusHookYieldEndsAt(previous, event.payload, workingSince)
-        : undefined
+    const yieldEndsAt = programStatusReportYieldEndsAt(previous, event.payload, workingSince, event)
     const hookOwnsAgent = yieldEndsAt !== undefined && now < yieldEndsAt
     if (event.fromProgramStatus === true) {
       if (hookOwnsAgent && previous && Number.isFinite(yieldEndsAt)) {
@@ -313,7 +310,10 @@ export abstract class AgentHookServerIngestTerminal extends AgentHookServerInges
       undefined,
       mutationBefore,
       newRun,
-      !preservedProviderSession
+      // A non-lease program report survived the yield gate: its fresh working evidence may release
+      // a Claude permission wait (#37003). Lease renewals stay held.
+      !preservedProviderSession,
+      event.renewsProgramStatusLease !== true ? event.fromProgramStatus : undefined
     )
   }
 }
