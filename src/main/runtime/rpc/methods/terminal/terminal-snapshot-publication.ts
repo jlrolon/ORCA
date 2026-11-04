@@ -28,7 +28,8 @@ export function isTerminalSnapshotForcedUnavailable(): boolean {
 export async function serializeBudgetedRequestedSnapshot(
   runtime: OrcaRuntimeService,
   ptyId: string,
-  scrollbackRows: number | undefined
+  scrollbackRows: number | undefined,
+  snapshotByteBudget?: MobileSnapshotByteBudget
 ): Promise<SerializedSnapshot> {
   if (isTerminalSnapshotForcedUnavailable()) {
     return null
@@ -46,11 +47,13 @@ export async function serializeBudgetedRequestedSnapshot(
         ? serialized.scrollbackAnsi
         : ''
     const data = scrollbackAnsi + serialized.data
-    const overByteBudget = terminalStreamByteLengthExceeds(data, REQUESTED_SNAPSHOT_BYTE_BUDGET)
+    const overByteBudget = snapshotByteBudget
+      ? overMobileSnapshotBudget(data, serialized, snapshotByteBudget)
+      : terminalStreamByteLengthExceeds(data, REQUESTED_SNAPSHOT_BYTE_BUDGET)
     if (!overByteBudget || rows === 0) {
       return {
         ...serialized,
-        data,
+        data: overByteBudget && snapshotByteBudget ? '' : data,
         scrollbackRows: rows,
         truncatedByByteBudget: rows < requestedRows || overByteBudget
       }
@@ -275,10 +278,17 @@ export async function serializeStableMobileRendererSnapshot(
 export async function sendMobileResizeRestream(
   runtime: OrcaRuntimeService,
   ptyId: string,
-  sendFrame: (opcode: TerminalStreamOpcode, payload?: Uint8Array<ArrayBufferLike>) => void,
+  sendFrame: (
+    opcode: TerminalStreamOpcode,
+    payload?: Uint8Array<ArrayBufferLike>
+  ) => boolean | void,
   event: { cols: number; rows: number; displayMode: string; reason: string; seq?: number },
   shouldSend?: () => boolean,
-  snapshotByteBudget?: MobileSnapshotByteBudget
+  snapshotByteBudget?: MobileSnapshotByteBudget,
+  publicationHooks?: {
+    before: () => void
+    after: (snapshot: NonNullable<SerializedSnapshot>) => void
+  }
 ): Promise<boolean> {
   // Only geometry reflow rewraps history; mode-only changes need no replay.
   if (event.reason !== 'apply-layout' || runtime.isTerminalAlternateScreen(ptyId)) {
@@ -291,7 +301,8 @@ export async function sendMobileResizeRestream(
   if (shouldSend && !shouldSend()) {
     return true
   }
-  sendSnapshotFrames(sendFrame, {
+  publicationHooks?.before()
+  const publication = sendSnapshotFrames(sendFrame, {
     kind: 'resized',
     cols: serialized.cols,
     rows: serialized.rows,
@@ -301,10 +312,14 @@ export async function sendMobileResizeRestream(
     source: serialized.source,
     cwd: serialized.cwd,
     oscLinks: serialized.oscLinks,
+    pendingEscapeTailAnsi: serialized.pendingEscapeTailAnsi,
     truncated: false,
     truncatedByByteBudget: serialized.truncatedByByteBudget,
     data: serialized.data
   })
+  if (publication.published) {
+    publicationHooks?.after(serialized)
+  }
   return true
 }
 

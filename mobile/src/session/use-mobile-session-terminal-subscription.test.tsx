@@ -1,3 +1,4 @@
+import { createTerminalApplicationWriter } from '../terminal/terminal-application-writer'
 // @vitest-environment happy-dom
 import { Terminal } from '@xterm/xterm'
 import { createElement } from 'react'
@@ -13,7 +14,10 @@ import { recoverActiveTerminalAfterForeground } from '../terminal/terminal-foreg
 import type { ConnectionState } from '../transport/types'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { TerminalWebViewHandle } from '../terminal/terminal-webview-contract'
+import type {
+  TerminalApplicationReceipt,
+  TerminalWebViewHandle
+} from '../terminal/terminal-webview-contract'
 import { MobileTerminalDiagnostics } from './mobile-terminal-diagnostics'
 import { terminalPaneViewport, type TerminalPaneViewport } from './mobile-terminal-pane-layout'
 import { TerminalViewportResubscribeBudget } from './mobile-terminal-viewport-resubscribe'
@@ -44,10 +48,13 @@ function subscriptionHarness(opts: {
   const terminal: TerminalWebViewHandle = {
     prepareForForegroundRecovery: vi.fn(),
     write: vi.fn(),
-    init: vi.fn(({ cols, rows }: { cols: number; rows: number }) => {
-      order.push(`init ${cols}x${rows}`)
-      fit = fit ?? PHONE
-    }),
+    init: vi.fn(
+      ({ cols, rows }: { cols: number; rows: number }, applied?: TerminalApplicationReceipt) => {
+        order.push(`init ${cols}x${rows}`)
+        fit = fit ?? PHONE
+        applied?.()
+      }
+    ),
     resize: vi.fn(),
     reflow: vi.fn(),
     clear: vi.fn(),
@@ -201,7 +208,13 @@ function subscriptionHarness(opts: {
     second,
     scrollback,
     terminal,
-    event: (index: number, data: unknown) => act(() => handlers[index](data)),
+    event: (index: number, data: unknown) => {
+      let receipt: unknown
+      act(() => {
+        receipt = handlers[index](data)
+      })
+      return receipt
+    },
     replaceTerminal: (next: TerminalWebViewHandle) => {
       currentTerminal = next
       fields.terminalRefs.current.set(HANDLE, next)
@@ -229,6 +242,29 @@ afterEach(() => {
 })
 
 describe('a terminal first subscribe', () => {
+  it('retires output when native chat covers it and rearms an input-only lease', () => {
+    const h = subscriptionHarness({ fit: PHONE, webReady: true })
+    h.subscribe()
+    h.fields.showNativeChatRef.current = true
+    const receipt = h.event(0, { type: 'data', chunk: 'covered output' })
+    expect(receipt).toBeUndefined()
+    expect(h.terminal.write).not.toHaveBeenCalled()
+    expect(h.stopStream).toHaveBeenCalledTimes(1)
+    expect(h.fields.terminalUnsubsRef.current.has(HANDLE)).toBe(false)
+    h.subscribe()
+    expect(h.fields.client.subscribe).toHaveBeenLastCalledWith(
+      'terminal.subscribe',
+      expect.objectContaining({
+        capabilities: { terminalBinaryStream: 1, mobileInputLeaseOnly: 1 }
+      }),
+      expect.any(Function)
+    )
+    h.event(1, { type: 'subscribed' })
+    expect(h.fields.markNativeChatInputLeaseReady).toHaveBeenCalledWith(HANDLE)
+    h.event(1, { type: 'data', chunk: 'old host lease output' })
+    expect(h.stopStream).toHaveBeenCalledTimes(1)
+    expect(h.fields.terminalUnsubsRef.current.has(HANDLE)).toBe(true)
+  })
   it('does not subscribe before its document is ready, then subscribes once from its box', async () => {
     const harness = subscriptionHarness({ fit: PHONE, webReady: false })
     harness.subscribe()
@@ -370,7 +406,7 @@ describe('settled terminal fits belong to their stream and document', () => {
     h.event(0, { type: 'data', chunk: 'retired output' })
     expect(h.terminal.write).not.toHaveBeenCalled()
     h.event(1, { type: 'data', chunk: 'fresh output' })
-    expect(h.terminal.write).toHaveBeenCalledExactlyOnceWith('fresh output')
+    expect(h.terminal.write).toHaveBeenCalledExactlyOnceWith('fresh output', expect.any(Function))
   })
   it('does not send the previous document fit to a replacement WebView', () => {
     const h = start()
@@ -410,7 +446,8 @@ describe('settled terminal fits belong to their stream and document', () => {
   it('does not let an ignored older resize invalidate the latest accepted fit', () => {
     const h = start()
     h.event(0, { type: 'resized', seq: 3, cols: 60, rows: 40 })
-    h.event(0, { type: 'resized', seq: 2, cols: 62, rows: 42 })
+    const receipt = h.event(0, { type: 'resized', seq: 2, cols: 62, rows: 42, serialized: 'stale' })
+    expect(receipt).toBeInstanceOf(Promise)
     expect(fits(h)).toHaveLength(2)
     act(() => fits(h)[1]())
     expect(h.terminal.resetZoom).toHaveBeenCalledTimes(1)
@@ -434,6 +471,62 @@ describe('a stream terminating while subscribe is still returning', () => {
   })
 })
 
+describe('replacement terminal documents and physical streams', () => {
+  it('keeps output snapshot offsets out of layout sequence filtering', () => {
+    const h = subscriptionHarness({ fit: PHONE, webReady: true, viewport: PHONE })
+    h.subscribe()
+    h.event(0, { type: 'subscribed', seq: 1 })
+    h.event(0, {
+      type: 'scrollback',
+      seq: 5,
+      cols: PHONE.cols,
+      rows: PHONE.rows,
+      serialized: 'output'
+    })
+    h.event(0, { type: 'resized', seq: 2, cols: 62, rows: 42, serialized: 'new layout' })
+    expect(vi.mocked(h.terminal.init).mock.calls.map(([options]) => options.initialData)).toEqual([
+      'output',
+      'new layout'
+    ])
+  })
+
+  it('replaces an initial subscription whose document was lost before application', () => {
+    const h = subscriptionHarness({ fit: PHONE, webReady: true, viewport: PHONE })
+    vi.mocked(h.terminal.init).mockImplementation(() => {})
+    h.subscribe()
+    h.scrollback(0, PHONE.cols, PHONE.rows)
+    expect(h.fields.initializedHandlesRef.current.has(HANDLE)).toBe(false)
+    h.documentReady()
+    expect(h.stopStream).toHaveBeenCalledOnce()
+    expect(h.fields.client.subscribe).toHaveBeenCalledTimes(2)
+  })
+
+  it('applies a replacement physical snapshot and ACK overflow recovery in the same logical subscription', () => {
+    const h = subscriptionHarness({ fit: PHONE, webReady: true, viewport: PHONE })
+    h.subscribe()
+    h.scrollback(0, PHONE.cols, PHONE.rows)
+    h.event(0, { type: 'subscribed', streamId: 1 })
+    h.event(0, {
+      type: 'scrollback',
+      cols: PHONE.cols,
+      rows: PHONE.rows,
+      serialized: 'replacement'
+    })
+    h.event(0, {
+      type: 'scrollback',
+      cols: PHONE.cols,
+      rows: PHONE.rows,
+      serialized: 'recovery',
+      reason: 'ack-pending-overflow'
+    })
+    expect(vi.mocked(h.terminal.init).mock.calls.map(([options]) => options.initialData)).toEqual([
+      'x',
+      'replacement',
+      'recovery'
+    ])
+  })
+})
+
 describe('foreground snapshots preserve the terminal reading position', () => {
   it.each(['connected', 'reconnecting'] as const)(
     'restores the reading row after recovery from %s',
@@ -442,6 +535,7 @@ describe('foreground snapshots preserve the terminal reading position', () => {
       document.body.innerHTML = TERMINAL_DOCUMENT_MARKUP
       let ready = Promise.resolve()
       let resolveReady = () => {}
+      let writer: ReturnType<typeof createTerminalApplicationWriter> | undefined
       const scope = createTerminalDocumentScope({
         installHostTransport: () => () => {},
         hasEngine: () => true,
@@ -454,6 +548,7 @@ describe('foreground snapshots preserve the terminal reading position', () => {
         createWebglAddon: () => null,
         createUnicode11Addon: () => null,
         postToHost: (message) => {
+          writer?.receive(message)
           if (message.type === 'ready') {
             resolveReady()
           }
@@ -461,11 +556,12 @@ describe('foreground snapshots preserve the terminal reading position', () => {
       })
       startTerminalDocument(scope)
       try {
-        vi.mocked(h.terminal.init).mockImplementation((options) => {
+        writer = createTerminalApplicationWriter((command) => handleMsg(scope, command))
+        vi.mocked(h.terminal.init).mockImplementation((options, applied) => {
           ready = new Promise((resolve) => {
             resolveReady = resolve
           })
-          handleMsg(scope, { type: 'init', ...options })
+          writer!.snapshot({ type: 'init', ...options }, applied)
         })
         const snapshot = Array.from({ length: 200 }, (_, row) => `LINE_${row}`).join('\r\n')
         const replay = async (serialized: unknown = snapshot) => {
@@ -479,6 +575,9 @@ describe('foreground snapshots preserve the terminal reading position', () => {
         }
         h.subscribe()
         await replay()
+        await vi.waitFor(() =>
+          expect(h.fields.initializedHandlesRef.current.has(HANDLE)).toBe(true)
+        )
         expect(scope.term!.buffer.active.viewportY).toBe(scope.term!.buffer.active.baseY)
         scope.term!.scrollToLine(40)
         const readingRow = scope.term!.buffer.active.getLine(40)?.translateToString(true)
@@ -514,6 +613,7 @@ describe('foreground snapshots preserve the terminal reading position', () => {
         expect(scope.term!.buffer.active.viewportY).toBe(0)
         expect(scope.term!.buffer.active.baseY).toBe(0)
       } finally {
+        writer?.clear()
         stopTerminalDocument(scope)
       }
     }
@@ -556,15 +656,16 @@ describe('two visible terminal subscriptions', () => {
     harness.scrollback(1, 30, 20)
     harness.event(0, { type: 'data', chunk: 'first' })
     harness.event(1, { type: 'data', chunk: 'second' })
-    expect(harness.terminal.write).toHaveBeenCalledWith('first')
-    expect(harness.terminal.write).not.toHaveBeenCalledWith('second')
-    expect(harness.second.write).toHaveBeenCalledWith('second')
+    expect(harness.terminal.write).toHaveBeenCalledWith('first', expect.any(Function))
+    expect(harness.terminal.write).not.toHaveBeenCalledWith('second', expect.any(Function))
+    expect(harness.second.write).toHaveBeenCalledWith('second', expect.any(Function))
     expect(harness.second.init).toHaveBeenCalledWith(
-      expect.objectContaining({ cols: 30, rows: 20, frame: { width: 240, height: 320 } })
+      expect.objectContaining({ cols: 30, rows: 20, frame: { width: 240, height: 320 } }),
+      expect.any(Function)
     )
     harness.fields.activeHandleRef.current = 'term-2'
     harness.event(0, { type: 'data', chunk: 'still live' })
-    expect(harness.terminal.write).toHaveBeenCalledWith('still live')
+    expect(harness.terminal.write).toHaveBeenCalledWith('still live', expect.any(Function))
     expect(harness.fields.terminalUnsubsRef.current.size).toBe(2)
   })
 })

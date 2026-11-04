@@ -13,12 +13,75 @@ import {
   isMultiplexStreamAttached,
   type TerminalMultiplexConnection
 } from './terminal-multiplex-connection'
-import type { TerminalMultiplexStream } from './terminal-stream-types'
-import type { TerminalOutputFrameChunk } from '../../terminal-output-frame-chunks'
+import type { TerminalMultiplexStream, TerminalOutputChunk } from './terminal-stream-types'
+import {
+  iterateTerminalOutputFrameChunks,
+  type TerminalOutputFrameChunk
+} from '../../terminal-output-frame-chunks'
+import {
+  TerminalStreamOpcode,
+  decodeTerminalStreamJson,
+  decodeTerminalStreamText
+} from '../../../../../shared/terminal-stream-protocol'
+import { getOutputAfterSnapshotSeq } from './terminal-stream-replay'
 import {
   markYieldedQueriesDiscardedInFrames,
-  replaySnapshotCoveredStatelessQueries
+  replaySnapshotCoveredQueries
 } from './terminal-multiplex-yielded-queries'
+
+export function reconcileMultiplexSnapshotOutput(
+  state: TerminalMultiplexConnection,
+  stream: TerminalMultiplexStream,
+  snapshotSeq: number | undefined,
+  pendingEscapeTailAnsi?: string,
+  pendingOutput: readonly TerminalOutputChunk[] = []
+): void {
+  const snapshotOutput = [...pendingOutput]
+  if (typeof snapshotSeq === 'number') {
+    const discarded: TerminalOutputFrameChunk[] = []
+    stream.ackPendingOutput = stream.ackPendingOutput.flatMap((chunk) => {
+      if (typeof chunk.seq !== 'number') {
+        return [chunk]
+      }
+      if (chunk.seq <= snapshotSeq) {
+        discarded.push(chunk)
+        return []
+      }
+      const span =
+        chunk.opcode === TerminalStreamOpcode.OutputSpan
+          ? decodeTerminalStreamJson<{ data: string; rawLength: number; transformed: boolean }>(
+              chunk.bytes
+            )
+          : null
+      const output = {
+        data: span?.data ?? decodeTerminalStreamText(chunk.bytes),
+        bytes: chunk.bytes.byteLength,
+        meta: {
+          seq: chunk.seq,
+          rawLength: span?.rawLength ?? chunk.displayLength,
+          transformed: span?.transformed
+        }
+      }
+      const uncovered = getOutputAfterSnapshotSeq(output, snapshotSeq)
+      if (uncovered === output) {
+        return [chunk]
+      }
+      discarded.push(chunk)
+      if (!uncovered) {
+        snapshotOutput.push(output)
+      }
+      return uncovered
+        ? Array.from(iterateTerminalOutputFrameChunks(uncovered.data, uncovered.meta, 'span'))
+        : []
+    })
+    markYieldedQueriesDiscardedInFrames(stream, discarded)
+    stream.ackPendingOutputBytes = stream.ackPendingOutput.reduce(
+      (total, chunk) => total + chunk.bytes.byteLength,
+      0
+    )
+  }
+  replaySnapshotCoveredQueries(state, stream, snapshotOutput, snapshotSeq, pendingEscapeTailAnsi)
+}
 
 export function installMultiplexFlowControl(state: TerminalMultiplexConnection): void {
   const { runtime, streams } = state
@@ -41,7 +104,8 @@ export function installMultiplexFlowControl(state: TerminalMultiplexConnection):
       const serialized = await serializeBudgetedRequestedSnapshot(
         runtime,
         stream.ptyId,
-        carriesHistory ? TERMINAL_MULTIPLEX_RECOVERY_SCROLLBACK_ROWS : 0
+        carriesHistory ? TERMINAL_MULTIPLEX_RECOVERY_SCROLLBACK_ROWS : 0,
+        stream.snapshotByteBudget
       )
       if (!isMultiplexStreamAttached(state, stream) || stream.outputPaused) {
         return
@@ -64,6 +128,7 @@ export function installMultiplexFlowControl(state: TerminalMultiplexConnection):
           reason: 'ack-pending-overflow',
           seq: serialized.seq,
           source: serialized.source,
+          pendingEscapeTailAnsi: serialized.pendingEscapeTailAnsi,
           kittyKeyboardFlags: serialized.kittyKeyboardFlags,
           alternateScreen: serialized.alternateScreen,
           terminalOwner: serialized.terminalOwner,
@@ -79,21 +144,14 @@ export function installMultiplexFlowControl(state: TerminalMultiplexConnection):
       if (!isMultiplexStreamAttached(state, stream)) {
         throw new Error('Remote terminal recovery snapshot stream detached.')
       }
-      if (typeof serialized.seq === 'number') {
-        const snapshotSeq = serialized.seq
-        const isCovered = (chunk: TerminalOutputFrameChunk): boolean =>
-          typeof chunk.seq === 'number' && chunk.seq <= snapshotSeq
-        markYieldedQueriesDiscardedInFrames(stream, stream.ackPendingOutput.filter(isCovered))
-        const retained = stream.ackPendingOutput.filter((chunk) => !isCovered(chunk))
-        stream.ackPendingOutput = retained
-        stream.ackPendingOutputBytes = retained.reduce(
-          (total, chunk) => total + chunk.bytes.byteLength,
-          0
-        )
-      }
       stream.ackPendingOutputOverflowed = false
       stream.ackRecoveryHistoryOwed = !carriesHistory
-      replaySnapshotCoveredStatelessQueries(state, stream, [], serialized.seq)
+      reconcileMultiplexSnapshotOutput(
+        state,
+        stream,
+        serialized.seq,
+        serialized.pendingEscapeTailAnsi
+      )
     } catch (error) {
       if (!isMultiplexStreamAttached(state, stream)) {
         return

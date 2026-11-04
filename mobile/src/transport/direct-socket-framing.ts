@@ -11,6 +11,7 @@ import {
 } from './mobile-e2ee-v2-physical-channel'
 import type { ConnectionLogEmitter } from './types'
 import { websocketPayloadToUint8 } from './websocket-payload-bytes'
+import { MobileWsInboundMessageQueue } from './mobile-ws-inbound-message-queue'
 
 export type DirectSocketFramingEvents = {
   onReadyAccepted: () => void
@@ -27,6 +28,7 @@ export type DirectSocketFraming = {
   handleInbound: (raw: unknown) => void
   // false = not ready yet; throws when the socket write fails.
   sendText: (plaintext: string) => boolean
+  sendBinary: (plaintext: Uint8Array) => boolean
   dispose: () => void
 }
 
@@ -76,6 +78,7 @@ function createV2Framing(args: Parameters<typeof createDirectSocketFraming>[0]) 
     },
     handleInbound: (raw: unknown) => void channel.handleMessage(raw),
     sendText: (plaintext: string) => channel.sendText(plaintext),
+    sendBinary: (plaintext: Uint8Array) => channel.sendBinary(plaintext),
     dispose: () => channel.dispose()
   }
 }
@@ -147,7 +150,7 @@ function createLegacyFraming(args: Parameters<typeof createDirectSocketFraming>[
     }
   }
 
-  const handleInbound = async (raw: unknown): Promise<void> => {
+  const handleInbound = (raw: unknown): void | Promise<void> => {
     if (typeof raw === 'string') {
       if (!authenticated) {
         handleHandshake(raw)
@@ -162,15 +165,21 @@ function createLegacyFraming(args: Parameters<typeof createDirectSocketFraming>[
     if (!authenticated) {
       return
     }
-    const bytes = await websocketPayloadToUint8(raw)
-    if (disposed || !bytes || !keyed) {
-      return
-    }
-    const plaintext = handshake.channel.openBinary(bytes)
-    if (plaintext) {
-      events.onBinary(plaintext)
-    }
+    return websocketPayloadToUint8(raw).then((bytes) => {
+      if (disposed || !bytes || !keyed) {
+        return
+      }
+      const plaintext = handshake.channel.openBinary(bytes)
+      if (plaintext) {
+        events.onBinary(plaintext)
+      }
+    })
   }
+
+  const inbound = new MobileWsInboundMessageQueue(handleInbound, (error) => {
+    disposed = true
+    events.onProtocolError(error instanceof Error ? error : new Error(String(error)))
+  })
 
   return {
     start: () => {
@@ -178,10 +187,18 @@ function createLegacyFraming(args: Parameters<typeof createDirectSocketFraming>[
       args.emitLog('info', 'Sent e2ee_hello', 'Awaiting server e2ee_ready')
       keyed = true
     },
-    handleInbound: (raw: unknown) => void handleInbound(raw),
+    handleInbound: (raw: unknown) => void inbound.enqueue(raw),
     sendText,
+    sendBinary: (plaintext: Uint8Array) => {
+      if (!keyed || disposed) {
+        return false
+      }
+      socket.send(handshake.channel.sealBinary(plaintext))
+      return true
+    },
     dispose: () => {
       disposed = true
+      inbound.dispose()
     }
   }
 }

@@ -15,6 +15,7 @@ import {
 } from './terminal-multiplex-test-harness'
 import {
   TERMINAL_MULTIPLEX_ACK_STREAM_INITIAL_WINDOW_BYTES,
+  TERMINAL_MULTIPLEX_ACK_TOTAL_INITIAL_WINDOW_BYTES,
   TERMINAL_MULTIPLEX_PENDING_MAX_BYTES
 } from '../../../shared/terminal-multiplex-flow-control'
 
@@ -25,12 +26,27 @@ describe.each([
   { parserState: 'CSI', pending: '\x1b[31', suffix: 'mAFTER', soleOwner: true },
   { parserState: 'OSC', pending: '\x1b]777;payload', suffix: 'end\x07AFTER', soleOwner: true },
   { parserState: 'DCS', pending: '\x1bP1qpayload', suffix: 'end\x1b\\AFTER', soleOwner: true },
+  { parserState: 'mobile ground', pending: '', suffix: 'AFTER', soleOwner: true, mobile: true },
+  {
+    parserState: 'mobile CSI',
+    pending: '\x1b[31',
+    suffix: 'mAFTER',
+    soleOwner: true,
+    mobile: true
+  },
+  {
+    parserState: 'mobile query cutoff',
+    pending: '\x1b[6',
+    suffix: 'nAFTER',
+    soleOwner: true,
+    mobile: true
+  },
   { parserState: 'ground with another owner', pending: '', suffix: 'AFTER', soleOwner: false }
 ])(
   'multiplex snapshot-covered queries with $parserState parser state',
-  ({ pending, suffix, soleOwner }) => {
+  ({ pending, suffix, soleOwner, mobile = false }) => {
     it.each(['initial', 'requested'] as const)(
-      'preserves DA1 ownership across the %s snapshot without replaying stale CPR',
+      'preserves query ownership across the %s snapshot and limits CPR to initial mobile replay',
       async (kind) => {
         vi.useFakeTimers()
         let output: ((data: string, meta?: RuntimeTerminalDataMeta) => void) | undefined
@@ -47,6 +63,8 @@ describe.each([
         const answerYieldedTerminalQueries = vi.fn()
         const harness = startDesktopMultiplexSubscribe({
           isSoleRemoteTerminalQueryOwner: () => soleOwner,
+          handleMobileSubscribe: vi.fn().mockResolvedValue(true),
+          handleMobileUnsubscribe: vi.fn(),
           answerYieldedTerminalQueries,
           serializeTerminalBuffer: vi.fn(async () => {
             if (!holdSnapshot) {
@@ -69,7 +87,11 @@ describe.each([
         })
         try {
           await vi.waitFor(() => expect(harness.handlers.has(0)).toBe(true))
-          sendDesktopMultiplexSubscribe(harness.handlers)
+          sendDesktopMultiplexSubscribe(
+            harness.handlers,
+            { ackOutput: 1 },
+            { id: 'viewer', type: mobile ? 'mobile' : 'desktop' }
+          )
           await vi.waitFor(() => expect(output).toBeDefined())
           if (kind === 'requested') {
             await vi.waitFor(() =>
@@ -116,9 +138,13 @@ describe.each([
           const live = frames
             .slice(snapshotEnd + 1)
             .filter((frame) => frame?.opcode === TerminalStreamOpcode.Output)
+          const initialCpr = mobile && kind === 'initial'
+          const crossesQuery = pending === '\x1b[6'
+          const replayed = initialCpr ? `\x1b[6n\x1b[c${crossesQuery ? '\x1b[6n' : ''}` : '\x1b[c'
+          const remaining = initialCpr && crossesQuery ? 'AFTER' : `${pending}${suffix}`
           expect(
             live.map((frame) => frame && decodeTerminalStreamText(frame.payload)).join('')
-          ).toBe(soleOwner ? `${pending ? '\x18' : ''}\x1b[c${pending}${suffix}` : suffix)
+          ).toBe(soleOwner ? `${pending ? '\x18' : ''}${replayed}${remaining}` : suffix)
           if (soleOwner) {
             expect(live[0]?.seq).toBe(0)
           }
@@ -139,7 +165,15 @@ describe.each([
                 await parsed
               }
             }
-            expect(replies).toEqual(soleOwner ? ['\x1b[?1;2c'] : [])
+            expect(replies).toEqual(
+              soleOwner
+                ? [
+                    ...(initialCpr ? ['\x1b[1;1R'] : []),
+                    '\x1b[?1;2c',
+                    ...(crossesQuery ? ['\x1b[1;1R'] : [])
+                  ]
+                : []
+            )
             expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('AFTER')
           } finally {
             terminal.dispose()
@@ -157,10 +191,19 @@ describe.each([
 it.each([
   { queryCount: 2, action: 'pause' },
   { queryCount: 20, action: 'drain' },
-  { queryCount: 200, action: 'drain' }
+  { queryCount: 200, action: 'drain' },
+  { queryCount: 2, action: 'drain', crossingAckFrame: true },
+  { queryCount: 3, action: 'drain', crossingAckFrame: true, sameLength: true },
+  { queryCount: 2, action: 'drain', crossingAckFrame: true, soleOwner: false }
 ])(
-  'preserves bounded query ownership for $queryCount transformed queries during $action',
-  async ({ queryCount, action }) => {
+  'preserves bounded transformed query ownership: $queryCount/$action crossing=$crossingAckFrame sameLength=$sameLength sole=$soleOwner',
+  async ({
+    queryCount,
+    action,
+    crossingAckFrame = false,
+    sameLength = false,
+    soleOwner = true
+  }) => {
     vi.useFakeTimers()
     let output: ((data: string, meta?: RuntimeTerminalDataMeta) => void) | undefined
     let completeSnapshot:
@@ -169,7 +212,7 @@ it.each([
     let holdSnapshot = false
     const answerYieldedTerminalQueries = vi.fn()
     const harness = startDesktopMultiplexSubscribe({
-      isSoleRemoteTerminalQueryOwner: () => true,
+      isSoleRemoteTerminalQueryOwner: () => soleOwner,
       answerYieldedTerminalQueries,
       serializeTerminalBuffer: vi.fn(async () => {
         if (!holdSnapshot) {
@@ -208,13 +251,25 @@ it.each([
       output?.(fill, { seq: fill.length, rawLength: fill.length })
       await vi.runOnlyPendingTimersAsync()
       harness.binaryFrames.splice(0)
+      const rawLength = queryCount * (sameLength ? 3 : 10)
+      const seq = fill.length + rawLength
+      const emitQueries = () =>
+        output?.('\x1b[c'.repeat(queryCount), { seq, rawLength, transformed: true })
+      if (crossingAckFrame) {
+        emitQueries()
+      }
       holdSnapshot = true
       send(TerminalStreamOpcode.SnapshotRequest, {})
       await vi.waitFor(() => expect(completeSnapshot).toBeDefined())
-      const rawLength = queryCount * 10
-      const seq = fill.length + rawLength
-      output?.('\x1b[c'.repeat(queryCount), { seq, rawLength, transformed: true })
-      completeSnapshot?.({ data: '', cols: 80, rows: 24, seq })
+      if (!crossingAckFrame) {
+        emitQueries()
+      }
+      completeSnapshot?.({
+        data: '',
+        cols: 80,
+        rows: 24,
+        seq: crossingAckFrame ? fill.length + Math.floor(rawLength / 2) : seq
+      })
       await vi.runOnlyPendingTimersAsync()
       if (action === 'pause') {
         send(TerminalStreamOpcode.SetOutputPaused, { paused: true })
@@ -227,7 +282,9 @@ it.each([
         .filter((frame) => frame?.opcode === TerminalStreamOpcode.Output)
         .map((frame) => frame && decodeTerminalStreamText(frame.payload))
         .join('')
-      expect(sentQueries).toBe('\x1b[c'.repeat(action === 'pause' ? 1 : 16))
+      expect(sentQueries).toBe(
+        '\x1b[c'.repeat(soleOwner ? (action === 'pause' ? 1 : Math.min(queryCount, 16)) : 0)
+      )
       if (action === 'pause') {
         expect(answerYieldedTerminalQueries).toHaveBeenCalledExactlyOnceWith('pty-1', '\x1b[c')
       } else {
@@ -446,3 +503,123 @@ it('drops a superseded snapshot replay and its escape tail queued behind the ACK
     await stream.cleanup()
   }
 })
+
+it.each(['', '\x1b[6'])(
+  'retains unsent initial mobile queries across replacement snapshots with escape tail %j',
+  async (pendingEscapeTailAnsi) => {
+    vi.useFakeTimers()
+    const listeners = new Map<string, (data: string, meta?: RuntimeTerminalDataMeta) => void>()
+    let releaseInitial: (() => void) | undefined
+    const prefix = 'covered\x1b[6n\x1b[c'
+    const suffix = pendingEscapeTailAnsi ? 'nAFTER' : 'AFTER'
+    const snapshotSeq = prefix.length + pendingEscapeTailAnsi.length
+    const answerYieldedTerminalQueries = vi.fn()
+    let holdInitial = true
+    const harness = startDesktopMultiplexSubscribe({
+      resolveLiveLeafForHandle: vi.fn((terminal) => ({ ptyId: terminal })),
+      isSoleRemoteTerminalQueryOwner: () => true,
+      handleMobileSubscribe: vi.fn().mockResolvedValue(true),
+      handleMobileUnsubscribe: vi.fn(),
+      answerYieldedTerminalQueries,
+      subscribeToTerminalData: vi.fn((ptyId, listener) => {
+        listeners.set(ptyId, listener)
+        return vi.fn()
+      }),
+      serializeTerminalBuffer: vi.fn(async (ptyId) => {
+        const snapshot = {
+          data: '',
+          cols: 80,
+          rows: 24,
+          seq: ptyId === 'mobile' ? snapshotSeq : 0,
+          pendingEscapeTailAnsi: ptyId === 'mobile' ? pendingEscapeTailAnsi : undefined
+        }
+        if (ptyId === 'mobile' && holdInitial) {
+          holdInitial = false
+          await new Promise<void>((resolve) => {
+            releaseInitial = resolve
+          })
+        }
+        return snapshot
+      })
+    })
+    const send = (streamId: number, opcode: TerminalStreamOpcode, payload: unknown): void => {
+      harness.handlers.get(opcode === TerminalStreamOpcode.Subscribe ? 0 : streamId)?.(
+        decodeTerminalStreamFrame(
+          encodeTerminalStreamFrame({
+            opcode,
+            streamId: opcode === TerminalStreamOpcode.Subscribe ? 0 : streamId,
+            seq: 1,
+            payload: encodeTerminalStreamJson(payload)
+          })
+        )!
+      )
+    }
+    const subscribe = (streamId: number, terminal: string): void =>
+      send(streamId, TerminalStreamOpcode.Subscribe, {
+        streamId,
+        terminal,
+        capabilities: { ackOutput: 1 },
+        client: { id: terminal, type: terminal === 'mobile' ? 'mobile' : 'desktop' },
+        viewport: { cols: 80, rows: 24 }
+      })
+    const outputs = () =>
+      harness.binaryFrames
+        .map(decodeTerminalStreamFrame)
+        .filter((frame) => frame?.opcode === TerminalStreamOpcode.Output)
+    try {
+      await vi.waitFor(() => expect(harness.handlers.has(0)).toBe(true))
+      for (let index = 0; index < 4; index += 1) {
+        const terminal = `blocker-${index}`
+        subscribe(8 + index, terminal)
+        await vi.waitFor(() => expect(harness.handlers.has(8 + index)).toBe(true))
+        await vi.runOnlyPendingTimersAsync()
+        listeners.get(terminal)?.('x'.repeat(TERMINAL_MULTIPLEX_ACK_STREAM_INITIAL_WINDOW_BYTES), {
+          seq: TERMINAL_MULTIPLEX_ACK_STREAM_INITIAL_WINDOW_BYTES,
+          rawLength: TERMINAL_MULTIPLEX_ACK_STREAM_INITIAL_WINDOW_BYTES
+        })
+        await vi.runOnlyPendingTimersAsync()
+      }
+      expect(outputs().reduce((total, frame) => total + frame!.payload.byteLength, 0)).toBe(
+        TERMINAL_MULTIPLEX_ACK_TOTAL_INITIAL_WINDOW_BYTES
+      )
+      subscribe(7, 'mobile')
+      await vi.waitFor(() => expect(releaseInitial).toBeDefined())
+      const data = `${prefix}${pendingEscapeTailAnsi}${suffix}`
+      listeners.get('mobile')?.(data, { seq: data.length, rawLength: data.length })
+      releaseInitial?.()
+      await vi.runOnlyPendingTimersAsync()
+      expect(outputs().filter((frame) => frame?.streamId === 7)).toHaveLength(0)
+      for (let replacement = 0; replacement < 2; replacement += 1) {
+        send(7, TerminalStreamOpcode.SnapshotRequest, {})
+        await vi.runOnlyPendingTimersAsync()
+      }
+      expect(
+        harness.binaryFrames
+          .map(decodeTerminalStreamFrame)
+          .filter(
+            (frame) => frame?.streamId === 7 && frame.opcode === TerminalStreamOpcode.SnapshotEnd
+          )
+      ).toHaveLength(3)
+      send(8, TerminalStreamOpcode.Ack, {
+        bytes: TERMINAL_MULTIPLEX_ACK_STREAM_INITIAL_WINDOW_BYTES
+      })
+      await vi.runOnlyPendingTimersAsync()
+      expect(
+        outputs()
+          .filter((frame) => frame?.streamId === 7)
+          .map((frame) => decodeTerminalStreamText(frame!.payload))
+          .join('')
+      ).toBe(
+        `${pendingEscapeTailAnsi ? '\x18' : ''}\x1b[6n\x1b[c${pendingEscapeTailAnsi ? '\x1b[6n' : ''}AFTER`
+      )
+      const deliveredFrames = outputs().length
+      send(7, TerminalStreamOpcode.SnapshotRequest, {})
+      await vi.runOnlyPendingTimersAsync()
+      expect(outputs()).toHaveLength(deliveredFrames)
+      expect(answerYieldedTerminalQueries).not.toHaveBeenCalled()
+    } finally {
+      harness.registry.cleanupSubscription('terminal-multiplex:conn-desktop-first-paint')
+      await harness.dispatchPromise
+    }
+  }
+)

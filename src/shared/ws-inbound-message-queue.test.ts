@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { WsInboundMessageQueue } from './ws-inbound-message-queue'
+import { WsInboundMessageBudget, WsInboundMessageQueue } from './ws-inbound-message-queue'
 
 function gate() {
   let release = (): void => {}
@@ -20,12 +20,93 @@ async function collect(): Promise<void> {
 }
 
 function enqueuePayload(queue: WsInboundMessageQueue, value: number) {
-  const payload = new Uint8Array(1024 * 1024)
+  const payload = new Uint8Array(64 * 1024)
   payload[0] = value
   return { ref: new WeakRef(payload), settled: queue.enqueue(payload) }
 }
 
 describe('WebSocket inbound message lifetime', () => {
+  it('keeps reentrant frames behind the active conversion', async () => {
+    const wait = gate()
+    const received: unknown[] = []
+    const errors: unknown[] = []
+    let reentrant: Promise<void> | undefined
+    const queue = new WsInboundMessageQueue(
+      (raw) => {
+        received.push(raw)
+        if (raw === 'active') {
+          reentrant = queue.enqueue('reentrant')
+          return wait.promise
+        }
+        return undefined
+      },
+      (error) => errors.push(error)
+    )
+    const active = queue.enqueue('active')
+    const later = queue.enqueue('later')
+    await Promise.resolve()
+    expect(received).toEqual(['active'])
+    wait.release()
+    await Promise.all([active, reentrant, later])
+    expect(received).toEqual(['active', 'reentrant', 'later'])
+    expect(errors).toEqual([])
+    queue.dispose()
+  })
+
+  it('admits a replacement after disposing pending frames behind a blocked conversion', async () => {
+    const budget = new WsInboundMessageBudget()
+    const wait = gate()
+    const errors: unknown[] = []
+    const retired = new WsInboundMessageQueue(
+      () => wait.promise,
+      (error) => errors.push(error),
+      budget
+    )
+    const active = retired.enqueue('active')
+    await Promise.resolve()
+    const pending = Array.from({ length: 255 }, () => retired.enqueue('pending'))
+    retired.dispose()
+    const received: unknown[] = []
+    const replacement = new WsInboundMessageQueue(
+      (raw) => {
+        received.push(raw)
+      },
+      (error) => errors.push(error),
+      budget
+    )
+    try {
+      await replacement.enqueue('ready')
+      expect(received).toEqual(['ready'])
+      expect(errors).toEqual([])
+    } finally {
+      replacement.dispose()
+      wait.release()
+      await Promise.all([active, ...pending])
+    }
+  })
+
+  it.each([1, 10])('bounds admission at %ix load while conversion is blocked', async (load) => {
+    const wait = gate()
+    const received: unknown[] = []
+    const errors: unknown[] = []
+    const queue = new WsInboundMessageQueue(
+      async (raw) => {
+        received.push(raw)
+        await wait.promise
+      },
+      (error) => errors.push(error)
+    )
+    const active = queue.enqueue(new Uint8Array(8 * 1024 * 1024))
+    await Promise.resolve()
+    const pending = Array.from({ length: 8 * load }, () =>
+      queue.enqueue(new Uint8Array(8 * 1024 * 1024))
+    )
+    expect(errors).toHaveLength(1)
+    wait.release()
+    await Promise.all([active, ...pending])
+    expect(received).toHaveLength(1)
+  })
+
   it.each([8, 80])(
     'releases %i queued payloads while the active conversion is blocked',
     async (count) => {
