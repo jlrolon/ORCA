@@ -21,6 +21,107 @@ afterEach(() => {
 })
 
 describe('accepted spawn followed by failed startup readiness', () => {
+  it('does not retain predecessor output when a replacement exits without printing', async () => {
+    const { runtime, terminal } = await createTranscriptPane({
+      paneTitle: 'shell',
+      foregroundProcess: 'bash',
+      launchAgent: 'hermes',
+      data: 'ImportError: predecessor client\r\n'
+    })
+    runtime.onPtyExit(TRANSCRIPT_PANE_PTY_ID, 1, 'inc-1', { providerExitObserved: true })
+    expect(runtime.readRecentTerminalOutput(TRANSCRIPT_PANE_PTY_ID)).toContain('predecessor client')
+    runtime.onPtySpawned(TRANSCRIPT_PANE_PTY_ID, 'inc-2', { awaitsRegistration: false })
+    runtime.registerPty(TRANSCRIPT_PANE_PTY_ID, terminal.worktreeId, null, {
+      tabId: 'tab-1',
+      leafId: '11111111-1111-4111-8111-111111111111',
+      incarnationId: 'inc-2',
+      launchedAgent: 'hermes'
+    })
+    runtime.onPtyExit(TRANSCRIPT_PANE_PTY_ID, 1, 'inc-2', { providerExitObserved: true })
+    expect(runtime.getPtyLivenessVerdict(TRANSCRIPT_PANE_PTY_ID)).toMatchObject({
+      status: 'exited',
+      incarnationId: 'inc-2'
+    })
+    expect(runtime.readRecentTerminalOutput(TRANSCRIPT_PANE_PTY_ID)).toBe('')
+  })
+
+  it('drops a null-incarnation exit tail when registerPty names the replacement', async () => {
+    const { runtime, terminal } = await createTranscriptPane({
+      paneTitle: 'shell',
+      foregroundProcess: 'bash',
+      launchAgent: 'hermes',
+      data: ''
+    })
+    const ptyId = 'pty-null-register'
+    runtime.registerPty(ptyId, terminal.worktreeId)
+    runtime.onPtyData(ptyId, 'ImportError: predecessor client\r\n', Date.now())
+    runtime.onPtyExit(ptyId, 1, undefined, { providerExitObserved: true })
+    expect(runtime.readRecentTerminalOutput(ptyId)).toContain('predecessor client')
+    runtime.registerPty(ptyId, terminal.worktreeId, null, {
+      tabId: 'unscoped',
+      leafId: 'not-a-leaf',
+      incarnationId: 'inc-2',
+      launchedAgent: 'hermes'
+    })
+    runtime.onPtyExit(ptyId, 1, 'inc-2', { providerExitObserved: true })
+    expect(runtime.readRecentTerminalOutput(ptyId)).toBe('')
+  })
+
+  it('drops a null-incarnation exit tail when spawn stamps the replacement before registerPty', async () => {
+    const { runtime, terminal } = await createTranscriptPane({
+      paneTitle: 'shell',
+      foregroundProcess: 'bash',
+      launchAgent: 'hermes',
+      data: ''
+    })
+    const ptyId = 'pty-null-spawn'
+    runtime.registerPty(ptyId, terminal.worktreeId)
+    runtime.onPtyData(ptyId, 'ImportError: predecessor client\r\n', Date.now())
+    runtime.onPtyExit(ptyId, 1, undefined, { providerExitObserved: true })
+    expect(runtime.readRecentTerminalOutput(ptyId)).toContain('predecessor client')
+    runtime.onPtySpawned(ptyId, 'inc-2', { awaitsRegistration: false })
+    runtime.registerPty(ptyId, terminal.worktreeId, null, {
+      tabId: 'unscoped',
+      leafId: 'not-a-leaf',
+      incarnationId: 'inc-2',
+      launchedAgent: 'hermes'
+    })
+    runtime.onPtyExit(ptyId, 1, 'inc-2', { providerExitObserved: true })
+    expect(runtime.readRecentTerminalOutput(ptyId)).toBe('')
+  })
+
+  it.each(['fresh', 'reattach', 'adopted', 'wrong-incarnation'] as const)(
+    'retains the failed Hermes launch output only for its own fresh process (%s)',
+    async (context) => {
+      const { runtime, handle, terminal } = await createTranscriptPane({
+        paneTitle: 'shell',
+        foregroundProcess: 'bash',
+        launchAgent: 'hermes',
+        data: '\x1b]133;C\x07\x1b[31mTraceback: startup failed\x1b[0m\r\nImportError: broken client\r\n',
+        ...(context === 'reattach' ? { isReattach: true } : {})
+      })
+      const creation = {
+        ...terminal,
+        ...(context === 'adopted' ? { agentSessionDisposition: 'adopted' as const } : {}),
+        ...(context === 'wrong-incarnation' ? { incarnationId: 'replacement' } : {})
+      }
+      runtime.onPtyExit(TRANSCRIPT_PANE_PTY_ID, 1, 'inc-1', {
+        providerExitObserved: true,
+        cause: { kind: 'exited', exitCode: 1 }
+      })
+      const error = await waitForWorkerAgentReady(runtime, handle, {
+        agent: 'hermes',
+        reusesTerminal: false,
+        creation,
+        timeoutMs: 50
+      }).catch((error: unknown) => error)
+      expect(error).toBeInstanceOf(Error)
+      expect(error).toHaveProperty('terminalExitCause', { kind: 'exited', exitCode: 1 })
+      expect(String(error).includes('ImportError: broken client')).toBe(context === 'fresh')
+      expect(String(error)).not.toContain('\x1b')
+    }
+  )
+
   it.each(
     (['pi', 'codex', 'claude', 'opencode'] as const).flatMap((agent) =>
       [true, false].map((exitBeforeWait) => ({ agent, exitBeforeWait }))
