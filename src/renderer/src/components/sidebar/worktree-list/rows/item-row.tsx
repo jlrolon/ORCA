@@ -67,12 +67,15 @@ export type WorktreeItemRowContext = {
 function getWorktreeItemRowGeometry(
   ctx: WorktreeItemRowContext,
   itemRow: WorktreeItemRow,
-  nested: boolean
+  nested: boolean,
+  inProjectBlock: boolean
 ): { surfaceInset: number; cardContentIndent: number } {
   // Why: the shared child wrapper already inherits the parent's group and content offsets.
   if (nested) {
     return { surfaceInset: LINEAGE_NESTED_ROW_SURFACE_INSET, cardContentIndent: 0 }
   }
+  // Why: the project block frame already carries the group indent.
+  const groupDepth = inProjectBlock ? 0 : itemRow.groupDepth
 
   const projectGroupId = itemRow.repo?.projectGroupId
   const isFolderBackedRepoChild =
@@ -81,23 +84,23 @@ function getWorktreeItemRowGeometry(
   const getCardContentIndent = (lineageDepth: number): number =>
     isFolderBackedRepoChild
       ? getFolderBackedRepoWorktreeCardContentIndent({
-          groupDepth: itemRow.groupDepth,
+          groupDepth,
           lineageDepth
         })
       : getWorktreeCardContentIndent({
           isGrouped: ctx.groupBy !== 'none',
-          groupDepth: itemRow.groupDepth,
+          groupDepth,
           lineageDepth
         })
   const paddingLeft = getCardContentIndent(itemRow.depth)
   const surfaceInset = isFolderBackedRepoChild
     ? getFolderBackedRepoWorktreeCardSurfaceInset({
-        groupDepth: itemRow.groupDepth,
+        groupDepth,
         lineageDepth: itemRow.depth
       })
     : getWorktreeCardSurfaceInset({
         isGrouped: ctx.groupBy !== 'none',
-        groupDepth: itemRow.groupDepth
+        groupDepth
       })
   return {
     surfaceInset,
@@ -110,9 +113,15 @@ export function renderWorktreeItemRow(
   itemRow: WorktreeItemRow,
   nested: boolean,
   lineageChildren?: React.ReactNode,
-  forceActiveSurface = false
+  forceActiveSurface = false,
+  inProjectBlock = false
 ): React.JSX.Element {
-  const { surfaceInset, cardContentIndent } = getWorktreeItemRowGeometry(ctx, itemRow, nested)
+  const { surfaceInset, cardContentIndent } = getWorktreeItemRowGeometry(
+    ctx,
+    itemRow,
+    nested,
+    inProjectBlock
+  )
   const lineageChildrenStyle = lineageChildren
     ? getLineageChildrenInlineStyle(LINEAGE_CHILDREN_INLINE_OFFSET)
     : undefined
