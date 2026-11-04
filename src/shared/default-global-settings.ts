@@ -122,6 +122,7 @@ export function buildDefaultSettings(args: {
     windowBackgroundBlur: false,
     reduceVisualEffects: false,
     minimizeToTrayOnClose: false,
+    stopTerminalSessionsOnQuit: false,
     // Why: default-on everywhere so it round-trips across platforms; only darwin acts on it.
     showMenuBarIcon: true,
     terminalClipboardOnSelect: false,
