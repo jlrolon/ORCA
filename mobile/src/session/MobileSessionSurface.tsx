@@ -7,6 +7,7 @@ import type { MobileSessionController } from './use-mobile-session-controller'
 import { MobileSessionContentRow } from './MobileSessionContentRow'
 import { MobileSessionHeader } from './MobileSessionHeader'
 import { MobileSessionSheets } from './MobileSessionSheets'
+import { MobileTerminalUrlTapSheet } from './MobileTerminalUrlTapSheet'
 import { MobileWorkerAutoCloseStrip } from './MobileWorkerAutoCloseStrip'
 import { DetailCardLayer } from '../components/detail-card-host'
 import { AnchoredDetailCard } from '../components/AnchoredDetailCard'
@@ -131,6 +132,7 @@ export function MobileSessionSurface({ controller }: { controller: MobileSession
         </View>
       </DetailCardLayer>
       <MobileSessionSheets controller={controller} />
+      <MobileTerminalUrlTapSheet controller={controller} />
     </View>
   )
 }
