@@ -1,5 +1,6 @@
 import { selectAgentSessionCurrentRequests } from '../../../src/shared/agent-session/requests/agent-session-current-requests'
-import { useCallback } from 'react'
+
+import { useCallback, useMemo } from 'react'
 import { runningStructuredAgentSessionTurnId } from '../../../src/shared/agent-session/view/structured-agent-session-live-turn'
 import { mobileStructuredAgentSessionWorking } from './mobile-structured-agent-session-working'
 import { structuredSessionBackgroundTasksView } from '../../../src/shared/structured-session-background-tasks-view'
@@ -39,7 +40,40 @@ import {
   actionableStructuredQuestion
 } from './mobile-structured-actionable-prompt'
 
-/** The desktop's rule: the alternate flips the setting first, then the queue's own rules decide. */
+type MobileStructuredComposerOptions = Pick<
+  StructuredAgentSessionComposerOptions,
+  | 'snapshot'
+  | 'setOption'
+  | 'invokeAction'
+  | 'conversationCommands'
+  | 'compactInstructions'
+  | 'openSideChat'
+>
+
+export function useMobileStructuredComposerOptions(
+  options: MobileStructuredComposerOptions
+): MobileStructuredComposerOptions {
+  const {
+    snapshot,
+    setOption,
+    invokeAction,
+    conversationCommands,
+    compactInstructions,
+    openSideChat
+  } = options
+  return useMemo(
+    () => ({
+      snapshot,
+      setOption,
+      invokeAction,
+      conversationCommands,
+      compactInstructions,
+      openSideChat
+    }),
+    [snapshot, setOption, invokeAction, conversationCommands, compactInstructions, openSideChat]
+  )
+}
+
 export function mobileStructuredSendQueues(
   queueCapable: boolean,
   queueFollowUps: boolean,
@@ -83,7 +117,12 @@ export function useMobileStructuredSendWithOutcome(args: {
   sendsOut: MobileStructuredSendsOut
   controller: Pick<
     StructuredAgentSessionComposerOptions,
-    'snapshot' | 'setOption' | 'invokeAction' | 'conversationCommands' | 'compactInstructions'
+    | 'snapshot'
+    | 'setOption'
+    | 'invokeAction'
+    | 'conversationCommands'
+    | 'compactInstructions'
+    | 'openSideChat'
   >
   sessionCommands?: readonly AgentSessionSlashCommand[]
   onSendError: MobileNativeChatSendErrorReporter
@@ -151,6 +190,7 @@ export function useMobileStructuredSendWithOutcome(args: {
       const sendAttachments = attachments ?? []
       const commandOutcome = await dispatchMobileStructuredCommand({
         text,
+        skills: pickedSkills,
         hasAttachments: Boolean(sendAttachments.length || images?.length),
         client,
         sessionId,

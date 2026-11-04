@@ -1,4 +1,8 @@
-// @vitest-environment happy-dom
+import type { NativeChatComposerImageAttachment } from './NativeChatComposerField'
+import {
+  structuredComposerSendHarness as harness,
+  STRUCTURED_COMPOSER_SEND_ATTACHMENT as ATTACHMENT
+} from './native-chat-structured-composer-send.test-fixture'
 // @vitest-environment happy-dom
 import { structuredAgentSessionSendBody } from '../../../../shared/agent-session/requests/structured-agent-session-send-mutation'
 import {
@@ -12,64 +16,10 @@ import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-li
 import { createRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { dispatchStructuredAgentSessionComposerCommand } from '../../../../shared/agent-session/view/structured-agent-session-composer'
-import type { AgentType } from '../../../../shared/agent-status/contracts/agent-status-types'
 import type { NativeChatStructuredComposerTransport } from './native-chat-composer-types'
-import type { NativeChatComposerImageAttachment } from './NativeChatComposerField'
 import { useNativeChatStructuredComposerSend } from './use-native-chat-structured-composer-send'
 
 vi.mock('@/lib/native-chat-telemetry', () => ({ emitNativeChatMessageSent: vi.fn() }))
-
-const ATTACHMENT = { id: 'a1', path: '/tmp/shot.png' } as NativeChatComposerImageAttachment
-
-function harness(
-  agent: AgentType,
-  threadGoal?: NativeChatStructuredComposerTransport['threadGoal'],
-  onSubmitted?: () => void
-) {
-  const structuredTransport: NativeChatStructuredComposerTransport = {
-    capturePresentation: () => () => true,
-    send: vi.fn(() => true),
-    dispatchCommand: (text: string) =>
-      dispatchStructuredAgentSessionComposerCommand(text, {
-        agent,
-        sessionCommands: structuredTransport.sessionCommands,
-        snapshot: [],
-        invokeAction: async () => true,
-        setOption: async () => true,
-        conversationCommands: ['clear', 'compact'],
-        runConversationCommand: async () => ({ accepted: true, error: null })
-      }),
-    optionsSurface: {
-      getSnapshot: () => [],
-      setOption: vi.fn(),
-      invokeAction: vi.fn(),
-      subscribe: () => () => {}
-    },
-    optionSnapshot: [],
-    onError: vi.fn(),
-    runtime: 'local',
-    sessionId: 'session-test',
-    runtimeEnvironmentId: null
-  }
-  if (threadGoal) {
-    structuredTransport.threadGoal = threadGoal
-  }
-  structuredTransport.onSubmitted = onSubmitted
-  const setDraft = vi.fn()
-  const { result } = renderHook(() =>
-    useNativeChatStructuredComposerSend({
-      agent,
-      draftScopeKey: 'tab-1:pane',
-      imageAttachments: [ATTACHMENT],
-      structuredTransport,
-      isComposing: () => false,
-      clearSkillOrigin: vi.fn(),
-      setDraft,
-      setCaret: vi.fn()
-    })
-  )
-  return { send: result.current, structuredTransport, setDraft }
-}
 
 it.each([10, 100])(
   'ordinary Send skips %i reported commands for prose and still routes slash controls',
@@ -203,6 +153,28 @@ describe('a send held by its host', () => {
     await send('/model', [])
     expect(structuredTransport.onError).toHaveBeenCalled()
   })
+})
+
+it('holds a side-chat question behind the ordinary host permission gate, preserving its draft', async () => {
+  clearNativeChatComposerDraftsForTests()
+  const { send, structuredTransport, setDraft } = harness('codex')
+  const openSideChat = vi.fn(async () => true)
+  structuredTransport.openSideChat = openSideChat
+  structuredTransport.sendBlockedReason = 'Update Orca on this host to use Ask for approval.'
+  updateNativeChatComposerDraft('tab-1:pane', { text: '/btw inspect this' }, 'immediate')
+  const before = readNativeChatComposerDraft('tab-1:pane')
+  await send('/btw inspect this', [])
+  expect(openSideChat).not.toHaveBeenCalled()
+  expect(structuredTransport.send).not.toHaveBeenCalled()
+  expect(setDraft).not.toHaveBeenCalled()
+  expect(readNativeChatComposerDraft('tab-1:pane')).toBe(before)
+
+  await send('/btw', [])
+  expect(openSideChat).toHaveBeenCalledExactlyOnceWith('')
+  structuredTransport.sendBlockedReason = undefined
+  await send('/btw inspect this', [])
+  expect(openSideChat).toHaveBeenLastCalledWith('inspect this')
+  expect(openSideChat).toHaveBeenCalledTimes(2)
 })
 
 describe("says a failed send in Orca's words, with the error it hit apart", () => {
@@ -791,6 +763,39 @@ describe('complete handback acceptance', () => {
   )
 })
 
+it.each([true, false])(
+  'btw retains picked skills through command dispatch and acceptance=%s',
+  async (accepted) => {
+    clearNativeChatComposerDraftsForTests()
+    const skills = [{ name: 'review', path: '/picked/SKILL.md' }]
+    const edit = createNativeChatQueuedEditDraft(
+      {
+        kind: 'message',
+        role: 'user',
+        blocks: [{ type: 'text', text: '/btw use $review' }],
+        skills
+      },
+      'tab-1:pane'
+    )
+    updateNativeChatComposerDraft(
+      'tab-1:pane',
+      readNativeChatComposerDraft(edit.scopeKey),
+      'immediate'
+    )
+    discardNativeChatQueuedEdit(edit)
+    const { send, structuredTransport, setDraft } = harness('codex')
+    const openSideChat = vi.fn(async () => accepted)
+    structuredTransport.openSideChat = openSideChat
+    await act(async () => send('/btw use $review', []))
+    expect(openSideChat).toHaveBeenCalledExactlyOnceWith('use $review', skills)
+    expect(structuredTransport.send).not.toHaveBeenCalled()
+    if (accepted) {
+      expect(setDraft).toHaveBeenCalledWith('')
+    } else {
+      expect(setDraft).not.toHaveBeenCalled()
+    }
+  }
+)
 describe('scoped asynchronous submission ownership', () => {
   it.each([true, 'queued', false] as const)(
     'keeps synchronous %s admission as the existing complete transfer boundary',

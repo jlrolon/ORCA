@@ -240,3 +240,20 @@ it('disables the supported automatic continuation switch until host consent is k
   fireEvent.click(control)
   expect(updateSettings).not.toHaveBeenCalled()
 })
+
+it('opts into a shared side-chat pane, and allows returning new forks to the source pane', () => {
+  const updateSettings = vi.fn()
+  const view = renderSetting({}, updateSettings)
+  const toggle = view.getByRole('switch', { name: 'Group side chats in one pane' })
+  expect(toggle.getAttribute('aria-checked')).toBe('false')
+  fireEvent.click(toggle)
+  expect(updateSettings).toHaveBeenLastCalledWith({ nativeChatSideChatPane: true })
+  view.rerender(
+    <ChatBehaviorSetting
+      settings={{ ...getDefaultSettings('/tmp'), nativeChatSideChatPane: true }}
+      updateSettings={updateSettings}
+    />
+  )
+  fireEvent.click(view.getByRole('switch', { name: 'Group side chats in one pane' }))
+  expect(updateSettings).toHaveBeenLastCalledWith({ nativeChatSideChatPane: false })
+})

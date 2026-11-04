@@ -24,6 +24,7 @@ export function useNativeChatComposerCatalog(
   const reported = structuredTransport?.sessionCommands
   const conversationCommands = structuredTransport?.conversationCommands
   const compactInstructions = structuredTransport?.compactInstructions
+  const sideChat = structuredTransport?.openSideChat !== undefined
   const agentCommands = useMemo(
     () =>
       structured
@@ -32,11 +33,12 @@ export function useNativeChatComposerCatalog(
               agent,
               conversationCommands,
               reported,
-              compactInstructions
+              compactInstructions,
+              sideChat
             )
           )
         : getVerifiedNativeChatCommands(agent),
-    [agent, compactInstructions, conversationCommands, reported, structured]
+    [agent, compactInstructions, conversationCommands, reported, structured, sideChat]
   )
   const sessionSkills = useMemo(() => nativeChatSessionSkills(agent, reported), [agent, reported])
   return { agentCommands, sessionSkills }

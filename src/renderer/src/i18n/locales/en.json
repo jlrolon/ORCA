@@ -19820,7 +19820,9 @@
           "medium": "Med",
           "xhigh": "XHigh"
         },
-        "imageUnavailable": "Preview unavailable"
+        "imageUnavailable": "Preview unavailable",
+        "permissionReadOnly": "Read only",
+        "permissionReadOnlyDescription": "Uses a read-only sandbox without permission escalation"
       },
       "tool": {
         "exitCode": "exit {{value0}}",
@@ -20447,7 +20449,14 @@
         "scheduled": "Orca will continue this chat at {{time}}.",
         "cancel": "Don't continue"
       },
-      "settings": "Chat settings"
+      "settings": "Chat settings",
+      "sideChat": {
+        "new": "New side chat",
+        "badge": "btw",
+        "failed": "Could not open a side chat.",
+        "inheritPermissions": "Use main chat permissions",
+        "title": "Side chat"
+      }
     },
     "tab": {
       "bar": {
@@ -20862,7 +20871,9 @@
         "usageLimitContinueCopy": "Orca sends \"Continue where you left off.\" when the limit resets. Applies to all chats with a known reset time.",
         "usageLimitContinueSearchLimit": "usage limit",
         "usageLimitContinueSearchReset": "reset",
-        "usageLimitContinueToggleLabel": "Toggle continuing chats when a usage limit resets"
+        "usageLimitContinueToggleLabel": "Toggle continuing chats when a usage limit resets",
+        "sideChatPaneTitle": "Group side chats in one pane",
+        "sideChatPaneCopy": "Collect this workspace’s side chats in a shared split pane. When off, new side chats open beside their source tab; existing panes stay in place."
       }
     },
     "agentChildRow": {

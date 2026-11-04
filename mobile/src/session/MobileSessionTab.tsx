@@ -38,6 +38,9 @@ export function MobileSessionTab({
   onLongPress: () => void
 }) {
   const t = useMobileTranslation()
+  const sideChat = tab.type === 'agent-session' && !!tab.sideChatOf
+  const sideChatBadge = t('session.sideChat.badge', 'btw')
+  const accessibleTitle = sideChat ? `${sideChatBadge}, ${title}` : title
   const openerRef = useRef<View>(null)
   const source = useMemo<DetailCardSource>(
     () => ({ key: `tab:${tab.id}`, anchorRef: openerRef, openerRef, barRef, geometry: 'refresh' }),
@@ -66,10 +69,10 @@ export function MobileSessionTab({
         accessibilityLabel={
           tabState && tabState !== 'idle'
             ? t('session.tabStrip.tabStatus', '{{title}}, {{status}}', {
-                title,
+                title: accessibleTitle,
                 status: agentStateLabel(tabState)
               })
-            : title
+            : accessibleTitle
         }
         accessibilityState={{ selected: active }}
         onLongPress={onLongPress}
@@ -93,6 +96,7 @@ export function MobileSessionTab({
               <SquareTerminal size={13} color={colors.textSecondary} strokeWidth={2.1} />
             ) : null}
           </View>
+          {sideChat ? <Text style={styles.sideChatBadge}>{sideChatBadge}</Text> : null}
           <Text style={[styles.tabText, active && styles.tabTextActive]} numberOfLines={1}>
             {title}
           </Text>

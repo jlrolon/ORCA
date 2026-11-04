@@ -1,5 +1,14 @@
-import { structuredAgentSessionSendBody } from '../../../../../shared/agent-session/requests/structured-agent-session-send-mutation'
 import type { StructuredAgentLaunchReceipt } from './structured-agent-session-launch-recovery'
+import type {
+  StructuredPromptDeliveryResult,
+  StructuredLaunchPromptOptions,
+  StagedDelivery
+} from './structured-agent-session-launch-prompt-types'
+export type {
+  StructuredPromptDeliveryResult,
+  StructuredLaunchPromptOptions
+} from './structured-agent-session-launch-prompt-types'
+import { structuredAgentSessionSendBody } from '../../../../../shared/agent-session/requests/structured-agent-session-send-mutation'
 import type { StructuredAgentSessionFirstMessage } from '../../../../../shared/agent-session/structured-agent-session-create'
 import { StructuredAgentSessionCreateRefusalError } from './structured-agent-session-launch-errors'
 import { agentSessionThrownFailure } from '../../../../../shared/agent-session/failures/agent-session-write-failure'
@@ -15,14 +24,6 @@ import { noteStructuredAgentSessionFence } from '@/components/native-chat/struct
 import { publishStructuredAgentSessionSends } from '@/components/native-chat/structured-agent-session-pending-sends'
 import { agentSessionWriteNoticeText } from '@/components/native-chat/agent-session-write-notice-text'
 import type { RuntimeClientTarget } from '../../../../../shared/runtime-client-target'
-import type { StructuredPromptDeliveryResult } from './structured-agent-session-launch-callers'
-
-export type { StructuredPromptDeliveryResult } from './structured-agent-session-launch-callers'
-
-type StagedDelivery = Omit<StructuredPromptDeliveryResult, 'inComposer' | 'failureNotified'> & {
-  inComposer: boolean
-  failureNotified?: boolean
-}
 
 function promptDeliveryResult(outcome: StagedDelivery): StructuredPromptDeliveryResult {
   return {
@@ -32,14 +33,8 @@ function promptDeliveryResult(outcome: StagedDelivery): StructuredPromptDelivery
   }
 }
 
-export type StructuredLaunchPromptOptions = {
-  prompt?: string
-  promptDelivery?: 'auto-submit' | 'submit-after-ready' | 'draft'
-  onPromptDelivered?: () => void
-}
-
 /** Share one staged-text send across launch callers; reserve the chat send slot at click so typed messages cannot overtake it before create. */
-export type StagedStructuredLaunchPrompt = {
+export type StagedStructuredLaunchPrompt = Pick<StructuredLaunchPromptOptions, 'skills'> & {
   sessionId: string
   text: string
   slot: StructuredAgentSessionReservedSend | null
@@ -64,7 +59,7 @@ const staged = new Map<string, Set<StagedStructuredLaunchPrompt>>()
 export function stageStructuredLaunchPrompt(
   sessionId: string,
   text: string,
-  options: { callerKeepsText?: true } = {}
+  options: Pick<StructuredLaunchPromptOptions, 'skills'> & { callerKeepsText?: true } = {}
 ): StagedStructuredLaunchPrompt {
   let discard = (): void => {}
   const whenDiscarded = new Promise<void>((resolve) => {
@@ -199,7 +194,7 @@ function handBackStagedPrompt(prompt: StagedStructuredLaunchPrompt): boolean {
     return handBackStructuredAgentSessionMessage(
       prompt.sessionId,
       `launch-${prompt.sessionId}`,
-      structuredAgentSessionSendBody(prompt.text, [])
+      structuredAgentSessionSendBody(prompt.text, [], prompt.skills)
     )
   } catch (error) {
     console.error(

@@ -191,11 +191,13 @@ function created(params = createParams()) {
   }
 }
 const target = { kind: 'local' } as const
-const start = () =>
+type LaunchSkills = Parameters<typeof startStructuredAgentLaunch>[2]['skills']
+const start = (prompt = 'opening text', skills?: LaunchSkills) =>
   startStructuredAgentLaunch('workspace-1', 'codex', {
     requestId: newAgentLaunchRequestId(),
     executionHostId: 'local',
-    prompt: 'opening text'
+    prompt,
+    skills
   })
 const draft = (sessionId: string) =>
   readNativeChatDraftCache(structuredAgentSessionDraftScopeKey(sessionId))

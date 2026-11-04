@@ -20096,6 +20096,9 @@
         "hostUnavailable": "Der Host des Anhangs ist nicht verfügbar. Stelle die Verbindung erneut her und versuche es erneut.",
         "connectionChanged": "Die Verbindung hat sich geändert. Schließe diesen Anhang und öffne ihn erneut.",
         "readFailed": "Dieser Anhang konnte auf seinem Host nicht gelesen werden. Stelle die Verbindung erneut her und versuche es erneut. Die Datei wurde möglicherweise entfernt oder geändert."
+      },
+      "sideChat": {
+        "title": "Nebenchat"
       }
     },
     "tab": {
@@ -20501,7 +20504,9 @@
         "queueSearchSteer": "Steuern",
         "shellEnvSearchVariables": "Umgebungsvariablen",
         "shellEnvSearchPath": "PATH",
-        "shellEnvSearchProxy": "Proxy"
+        "shellEnvSearchProxy": "Proxy",
+        "sideChatPaneTitle": "Nebenchats in einem Bereich bündeln",
+        "sideChatPaneCopy": "Nebenchats dieses Arbeitsbereichs in einem geteilten Bereich sammeln. Wenn deaktiviert, öffnen neue Nebenchats neben ihrem Ursprungstab; bestehende Bereiche bleiben erhalten."
       }
     },
     "agentChildRow": {

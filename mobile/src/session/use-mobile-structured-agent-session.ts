@@ -108,7 +108,7 @@ export function useMobileStructuredAgentSession(
     turnId,
     hostSupport
   })
-  const sendController = useMobileStructuredCommandController(options)
+  const sendController = useMobileStructuredCommandController(options, args.openSideChat)
 
   const { respondPermission, respondQuestion } = useMobileStructuredPromptResponses({
     stateRef,

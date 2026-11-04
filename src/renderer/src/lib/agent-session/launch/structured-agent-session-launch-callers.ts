@@ -1,3 +1,4 @@
+import type { AgentJournalSkillRef } from '../../../../../shared/agent-session/journal/agent-session-journal-types'
 import type { StructuredAgentLaunchReceipt } from './structured-agent-session-launch-recovery'
 import type { StructuredLaunchSurfaceAddress } from './structured-agent-session-launch-record'
 import {
@@ -17,6 +18,7 @@ export type StructuredAgentLaunchOptions = {
   /** Background launches never ask host publication to select their tab. */
   activate?: boolean
   prompt?: string
+  skills?: readonly AgentJournalSkillRef[]
   promptDelivery?: 'auto-submit' | 'submit-after-ready' | 'draft'
   onPromptDelivered?: () => void
   /** The caller keeps the prompt's text if it does not go out (notes), so no composer gets it. */
@@ -25,6 +27,7 @@ export type StructuredAgentLaunchOptions = {
   draftFromScope?: string
   // Conversation adoption is launch identity, not a preference; see launchIdentity.
   resumeFrom?: StructuredAgentSessionResumeSource
+  sideChatOf?: string
   /** The host the route decided on; read only by the caller that starts the launch. */
   executionHostId?: ExecutionHostId
   /** The saved selection a paired host reported it will seed; read only by the starting caller. */
@@ -159,4 +162,13 @@ export function joinLaunchDelivery(
 
 export function promptOwner(options: StructuredAgentLaunchOptions): { callerKeepsText?: true } {
   return options.promptKeptByCaller ? { callerKeepsText: true } : {}
+}
+
+export function launchPromptOptions(
+  options: StructuredAgentLaunchOptions
+): Pick<StagedStructuredLaunchPrompt, 'skills' | 'callerKeepsText'> {
+  return {
+    ...(options.promptKeptByCaller ? { callerKeepsText: true } : {}),
+    ...(options.skills?.length ? { skills: options.skills } : {})
+  }
 }
