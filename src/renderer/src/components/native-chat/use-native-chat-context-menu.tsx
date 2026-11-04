@@ -52,6 +52,7 @@ import {
 import type { NativeChatFileLinkContext } from './native-chat-file-link'
 import type { NativeChatMessageListHandle } from './use-native-chat-reveal-latest'
 import type { NativeChatRewindSurface } from './use-native-chat-rewind'
+import type { NativeChatSplitDirection } from './native-chat-split-shortcut'
 import { useNativeChatStandaloneMenu } from './use-native-chat-standalone-menu'
 import type { NativeChatSessionMenuSource } from './use-native-chat-session-context-actions'
 
@@ -94,6 +95,7 @@ export type NativeChatContextMenuActions = {
   onPaste: () => void
   onSplitRight: () => void
   onSplitDown: () => void
+  onSplitWithTerminal?: (direction: NativeChatSplitDirection) => void
   canEqualizePaneSizes: boolean
   onEqualizePaneSizes: () => void
   canExpandPane: boolean

@@ -59,8 +59,11 @@ import { useNativeChatFileLinkContext } from './use-native-chat-file-link-contex
 import { useRecheckNativeChatFileLinksWhenTurnEnds } from './use-native-chat-file-link-existence'
 import { useNativeChatLocalCommandAnswer } from './use-native-chat-local-command-answer'
 import { useNativeChatImageRuntimeContext } from './native-chat-image-runtime-context'
-import { handleNativeChatSplitShortcut } from './native-chat-split-shortcut'
-import { formatShortcutLabel } from '@/hooks/useShortcutLabel'
+import {
+  handleNativeChatSplitShortcut,
+  nativeChatSplitShortcutLabels
+} from './native-chat-split-shortcut'
+import { getShortcutPlatform } from '@/lib/shortcut-platform'
 
 export function NativeChatResolvedView({
   paneKey,
@@ -300,10 +303,7 @@ export function NativeChatResolvedView({
     composerRef,
     enabled: isVisible,
     onSwitchToTerminal,
-    splitShortcutLabels: {
-      right: formatShortcutLabel('terminal.splitRight', keybindings),
-      down: formatShortcutLabel('terminal.splitDown', keybindings)
-    },
+    splitShortcutLabels: nativeChatSplitShortcutLabels(getShortcutPlatform(), keybindings),
     actions: { onPaste, ...(contextMenuActions ?? emptyNativeChatContextMenuActions) },
     messageListRef,
     fileLinkContext,
