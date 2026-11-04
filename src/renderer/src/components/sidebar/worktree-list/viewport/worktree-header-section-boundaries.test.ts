@@ -20,9 +20,9 @@ const groupHeader = (id: string): RenderRow =>
   }) as RenderRow
 const item = { type: 'item' } as RenderRow
 
-// Estimated starts: first header 28, later headers 32, items 116.
+// Estimated starts: project headers 32 (project block, no top margin), items 116.
 const rows = [repoHeader('a'), item, repoHeader('b'), item, repoHeader('c'), item]
-const startOfB = 28 + 116
+const startOfB = 32 + 116
 const startOfC = startOfB + 32 + 116
 
 describe('getRepoHeaderSectionEndByRepoId', () => {
@@ -79,6 +79,7 @@ describe('getProjectGroupHeaderSectionEndByGroupId', () => {
       ])
     })
 
-    expect(ends.get('a')).toBe(startOfC)
+    // Group labels keep the flat header sizing: first 28, later 32.
+    expect(ends.get('a')).toBe(28 + 116 + 32 + 116)
   })
 })
