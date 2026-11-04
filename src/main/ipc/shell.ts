@@ -1,5 +1,6 @@
 import { translateMain } from '../i18n/main-i18n'
-import { ipcMain, shell, dialog } from 'electron'
+import { BrowserWindow, ipcMain, shell, dialog } from 'electron'
+import type { IpcMainInvokeEvent, OpenDialogOptions, OpenDialogReturnValue } from 'electron'
 import { constants, copyFile, readFile, stat } from 'node:fs/promises'
 import { basename, extname, isAbsolute, normalize, posix, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -34,6 +35,17 @@ import {
 import { registerShellPathExistenceHandlers } from './shell-path-existence-handlers'
 
 export { EXTERNAL_EDITOR_CLI_COMMAND }
+
+// A parented dialog is modal (a sheet on macOS), so the window can't spawn a second picker.
+function showSenderOpenDialog(
+  event: IpcMainInvokeEvent,
+  options: OpenDialogOptions
+): Promise<OpenDialogReturnValue> {
+  const parentWindow = BrowserWindow.fromWebContents(event.sender)
+  return parentWindow
+    ? dialog.showOpenDialog(parentWindow, options)
+    : dialog.showOpenDialog(options)
+}
 
 const REPO_ICON_IMAGE_MIME_TYPES: Record<string, string> = {
   '.png': 'image/png'
@@ -201,8 +213,8 @@ export function registerShellHandlers(
 
   ipcMain.handle(
     'shell:pickDirectory',
-    async (_event, args: { defaultPath?: string }): Promise<string | null> => {
-      const result = await dialog.showOpenDialog({
+    async (event, args: { defaultPath?: string }): Promise<string | null> => {
+      const result = await showSenderOpenDialog(event, {
         defaultPath: args.defaultPath,
         // macOS creation-enabled pickers can create typed prefixes; this picker grants existing folders only.
         properties: ['openDirectory']
@@ -215,8 +227,8 @@ export function registerShellHandlers(
   )
 
   // Native dialogs avoid Electron prompt/file-input reliability issues.
-  ipcMain.handle('shell:pickAttachment', async (): Promise<string | null> => {
-    const result = await dialog.showOpenDialog({
+  ipcMain.handle('shell:pickAttachment', async (event): Promise<string | null> => {
+    const result = await showSenderOpenDialog(event, {
       properties: ['openFile']
     })
     if (result.canceled || result.filePaths.length === 0) {
@@ -226,15 +238,15 @@ export function registerShellHandlers(
   })
 
   // Keep single-file callers, including interpreter selection, on pickAttachment.
-  ipcMain.handle('shell:pickAttachments', async (): Promise<string[]> => {
-    const result = await dialog.showOpenDialog({
+  ipcMain.handle('shell:pickAttachments', async (event): Promise<string[]> => {
+    const result = await showSenderOpenDialog(event, {
       properties: ['openFile', 'multiSelections']
     })
     return result.canceled ? [] : result.filePaths
   })
 
-  ipcMain.handle('shell:pickImage', async (): Promise<string | null> => {
-    const result = await dialog.showOpenDialog({
+  ipcMain.handle('shell:pickImage', async (event): Promise<string | null> => {
+    const result = await showSenderOpenDialog(event, {
       properties: ['openFile'],
       filters: [
         {
@@ -249,8 +261,8 @@ export function registerShellHandlers(
     return result.filePaths[0]
   })
 
-  ipcMain.handle('shell:pickRepoIconImage', async (): Promise<RepoIconPickResult> => {
-    const result = await dialog.showOpenDialog({
+  ipcMain.handle('shell:pickRepoIconImage', async (event): Promise<RepoIconPickResult> => {
+    const result = await showSenderOpenDialog(event, {
       properties: ['openFile'],
       filters: [
         {
@@ -282,8 +294,8 @@ export function registerShellHandlers(
     }
   })
 
-  ipcMain.handle('shell:pickAudio', async (): Promise<string | null> => {
-    const result = await dialog.showOpenDialog({
+  ipcMain.handle('shell:pickAudio', async (event): Promise<string | null> => {
+    const result = await showSenderOpenDialog(event, {
       properties: ['openFile'],
       filters: [
         {
