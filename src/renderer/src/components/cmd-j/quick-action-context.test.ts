@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   buildCmdJQuickActionContext,
   getCurrentWorkspaceActionAvailability,
@@ -7,9 +7,15 @@ import {
   type CmdJQuickActionContext
 } from './quick-action-context'
 import { getCmdJQuickActions } from './quick-actions'
+import { i18n, loadRendererUiLanguage } from '@/i18n/i18n'
+import { buildCmdJActionResults, rankCmdJMiddleResults } from './palette-results'
 import type { AppState } from '@/store/types'
 import type { Worktree } from '../../../../shared/worktree/types'
 import { createTestStore, makeUnifiedTab, makeWorktree } from '@/store/slices/store-test-helpers'
+
+afterEach(async () => {
+  await i18n.changeLanguage('en')
+})
 
 type GroupState = Pick<AppState, 'activeGroupIdByWorktree' | 'groupsByWorktree'>
 
@@ -405,6 +411,66 @@ describe('Cmd+J quick action context', () => {
     expect(calls).toEqual(['delete'])
   })
 
+  async function rankNativeChatSplits(
+    locale: Parameters<typeof loadRendererUiLanguage>[0],
+    query: string
+  ) {
+    await i18n.changeLanguage(await loadRendererUiLanguage(locale))
+    const context = {
+      ...ctx({}),
+      activeWorktree: null,
+      runtimeMode: 'local-desktop' as const,
+      openNewBrowserTab: async () => {},
+      openBrowserUrl: async () => {},
+      openNewMarkdownFile: async () => {},
+      openNewTerminalTab: async () => {},
+      openCreateWorkspace: () => {},
+      deleteActiveWorkspace: () => {},
+      openAddQuickCommand: () => {},
+      canSplitActiveChat: true
+    } satisfies CmdJQuickActionContext
+    const actions = getCmdJQuickActions().filter((action) => action.isAvailable(context).available)
+    const results = rankCmdJMiddleResults({
+      query,
+      settingsResults: [],
+      actionResults: buildCmdJActionResults(actions)
+    }).filter((result) => result.id.startsWith('split-chat-'))
+    return { actions: actions.filter((action) => action.id.startsWith('split-chat-')), results }
+  }
+
+  it.each([
+    ['en', 'split chat'],
+    ['ko', '채팅 분할'],
+    ['ko', '터미널 분할']
+  ] as const)('finds both terminal splits in %s for %s', async (locale, query) => {
+    const { actions, results } = await rankNativeChatSplits(locale, query)
+    expect(results.map((result) => result.id).sort()).toEqual([
+      'split-chat-down',
+      'split-chat-right'
+    ])
+    expect(results.map((result) => result.title)).toEqual(
+      expect.arrayContaining(actions.map((action) => action.title))
+    )
+  })
+
+  it.each([
+    ['zh', '右侧拆分聊天', 'split-chat-right'],
+    ['ja', '右の分割チャット', 'split-chat-right'],
+    ['ja', 'チャットを下に分割', 'split-chat-down'],
+    ['ko', '채팅을 오른쪽으로 분할', 'split-chat-right']
+  ] as const)('keeps the former %s directional title %s searchable', async (locale, query, id) => {
+    const { results } = await rankNativeChatSplits(locale, query)
+    expect(results[0]?.id).toBe(id)
+  })
+
+  it('keeps chat pane searches available for both terminal splits', async () => {
+    const { results } = await rankNativeChatSplits('en', 'chat pane')
+    expect(results.map((result) => result.id).sort()).toEqual([
+      'split-chat-down',
+      'split-chat-right'
+    ])
+  })
+
   it('offers and runs split actions only for an active movable chat', async () => {
     const calls: string[] = []
     const action = getCmdJQuickActions().find((entry) => entry.id === 'split-chat-right')
@@ -426,6 +492,9 @@ describe('Cmd+J quick action context', () => {
       }
     } satisfies CmdJQuickActionContext
 
+    expect(action?.title).toBe('Split Terminal Right')
+    expect(action?.description).toBe('Split Terminal Right')
+    expect(action?.verbKeywords).toContain('split chat right')
     expect(action?.isAvailable(context)).toEqual({ available: true })
     await expect(action?.run(context)).resolves.toEqual({ status: 'ok' })
     expect(calls).toEqual(['right'])
