@@ -40,7 +40,7 @@ describe('CdpWsProxy', () => {
   const defaultPdfMarginInches = 1 / 2.54
 
   it('starts on a random port and returns ws:// URL', () => {
-    expect(endpoint).toMatch(/^ws:\/\/127\.0\.0\.1:\d+$/)
+    expect(endpoint).toMatch(/^ws:\/\/127\.0\.0\.1:\d+\/[\da-f]{64}$/)
     expect(proxy.getPort()).toBeGreaterThan(0)
   })
 

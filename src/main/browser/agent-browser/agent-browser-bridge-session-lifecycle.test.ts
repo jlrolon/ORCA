@@ -33,6 +33,7 @@ vi.mock('electron', () => {
     webContents: { fromId: webContentsFromIdMock }
   }
 })
+const CDP_ENDPOINT = 'ws://127.0.0.1:9222/token'
 const { CdpWsProxyMock } = vi.hoisted(() => {
   const instances: unknown[] = []
   const MockClass = vi.fn().mockImplementation(function (
@@ -40,7 +41,7 @@ const { CdpWsProxyMock } = vi.hoisted(() => {
     _wc: unknown
   ) {
     this._wc = _wc
-    this.start = vi.fn(async () => 'ws://127.0.0.1:9222')
+    this.start = vi.fn(async () => 'ws://127.0.0.1:9222/token')
     this.stop = vi.fn(async () => {})
     this.getPort = vi.fn(() => 9222)
     instances.push(this)
@@ -307,7 +308,7 @@ describe('AgentBrowserBridge', () => {
     expect(releasePaint).toHaveBeenCalledTimes(1)
   })
 
-  it('destroys session on process swap and re-inits with --cdp', async () => {
+  it('destroys session on process swap and re-inits with the CDP endpoint', async () => {
     const tabs = new Map([['tab-1', 100]])
     const mgr = mockBrowserManager(tabs)
     const b = new AgentBrowserBridge(mgr)
@@ -318,7 +319,7 @@ describe('AgentBrowserBridge', () => {
     })
     await b.snapshot()
 
-    expect(firstSpawns.find(({ command }) => command[0] === 'snapshot')?.args).toContain('--cdp')
+    expect(firstSpawns.find(({ command }) => command[0] === 'snapshot')?.cdp).toBe(CDP_ENDPOINT)
 
     tabs.set('tab-1', 200)
     const newWc = mockWebContents(200)
@@ -331,8 +332,8 @@ describe('AgentBrowserBridge', () => {
     })
     await b.snapshot()
 
-    expect(swappedSpawns.findLast(({ command }) => command[0] === 'snapshot')?.args).toContain(
-      '--cdp'
+    expect(swappedSpawns.findLast(({ command }) => command[0] === 'snapshot')?.cdp).toBe(
+      CDP_ENDPOINT
     )
   })
 
@@ -428,7 +429,7 @@ describe('AgentBrowserBridge', () => {
     const routeSpawns = spawns.filter(({ command }) => isNetworkCommand(command, 'route'))
     expect(routeSpawns).toHaveLength(2)
     expect(routeSpawns.at(-1)?.command).toContain('https://old.example/**')
-    expect(routeSpawns.at(-1)?.args).toContain('--cdp')
+    expect(routeSpawns.at(-1)?.cdp).toBe(CDP_ENDPOINT)
   })
 
   it('does not replay stale intercept routes after process swap when the first command disables routing', async () => {
@@ -450,8 +451,8 @@ describe('AgentBrowserBridge', () => {
     await b.interceptDisable()
 
     expect(spawns.filter(({ command }) => isNetworkCommand(command, 'route'))).toHaveLength(0)
-    expect(spawns.find(({ command }) => isNetworkCommand(command, 'unroute'))?.args).toContain(
-      '--cdp'
+    expect(spawns.find(({ command }) => isNetworkCommand(command, 'unroute'))?.cdp).toBe(
+      CDP_ENDPOINT
     )
   })
 
@@ -477,7 +478,7 @@ describe('AgentBrowserBridge', () => {
     expect(routeSpawns).toHaveLength(1)
     expect(routeSpawns[0].command).toContain('https://new.example/**')
     expect(routeSpawns[0].command).not.toContain('https://old.example/**')
-    expect(routeSpawns[0].args).toContain('--cdp')
+    expect(routeSpawns[0].cdp).toBe(CDP_ENDPOINT)
   })
 
   it('replays intercept routes after the daemon idles out', async () => {
