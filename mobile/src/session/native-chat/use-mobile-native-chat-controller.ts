@@ -17,7 +17,10 @@ import { useMobileNativeChatActiveResolution } from './use-mobile-native-chat-ac
 import { useMobileNativeChatPromptController } from '../use-mobile-native-chat-prompt-controller'
 import { nativeChatPendingSendPlacement } from '../../../../src/shared/native-chat/transcript/native-chat-pending-sends'
 import { mobileNativeChatScopeKey } from './mobile-native-chat-scope-key'
-import { useMobileTerminalChatQueue } from './use-mobile-terminal-chat-queue'
+import {
+  terminalQueueComposerFields,
+  useMobileTerminalChatQueue
+} from './use-mobile-terminal-chat-queue'
 
 export function useMobileNativeChatController(args: {
   client: RpcClient | null
@@ -154,8 +157,8 @@ export function useMobileNativeChatController(args: {
   const { enabled: terminalQueueEnabled, ...terminalQueue } = useMobileTerminalChatQueue({
     ...args,
     terminal: activeHandleRef.current,
-    enabled: !activeChatStructured && activeChatAgent === 'hermes' && inputSendable,
-    appendText: appendComposerText
+    appendText: appendComposerText,
+    enabled: !activeChatStructured && activeChatAgent === 'hermes' && inputSendable
   })
   const terminalTurn = useMobileNativeChatTerminalTurn({
     status: nativeChatStatus,
@@ -212,11 +215,6 @@ export function useMobileNativeChatController(args: {
     onSendError
   })
 
-  const terminalQueueSend = terminalQueue.bindSend(
-    captureSendOrigin,
-    clearDraftForSend,
-    handleNativeChatSendWithOutcome
-  )
   const structuredNativeChatSend = useMobileStructuredNativeChatSendBridge({
     agent: activeChatResolution?.agent,
     sessionCommands: nativeChatLane.sessionCommands.commands,
@@ -294,25 +292,24 @@ export function useMobileNativeChatController(args: {
     nativeChatActionablePromptIds: structuredNativeChat.actionablePromptIds,
     nativeChatCommandRefusalCauses: structuredNativeChat.commandRefusalCauses,
     nativeChatCanStop: activeChatStructured ? structuredNativeChat.canStop : nativeChatAgentWorking,
-    nativeChatSendFollowUp: activeChatStructured
-      ? structuredNativeChat.sendFollowUp
-      : terminalQueue.sendFollowUp,
+    ...terminalQueueComposerFields({
+      structured: activeChatStructured,
+      queueEnabled: terminalQueueEnabled,
+      structuredFollowUp: structuredNativeChat.sendFollowUp,
+      queueFollowUp: terminalQueue.sendFollowUp,
+      bindSend: terminalQueue.bindSend,
+      bind: [captureSendOrigin, clearDraftForSend, handleNativeChatSendWithOutcome],
+      structuredSend: structuredNativeChatSend.send,
+      plainSend: handleNativeChatSend,
+      structuredOutcome: structuredNativeChatSend.sendWithOutcome,
+      plainOutcome: handleNativeChatSendWithOutcome
+    }),
     nativeChatStreamingText: terminalTurn.streamingText,
     ...prompts,
     handleNativeChatStop: activeChatStructured ? structuredNativeChat.cancel : terminalTurn.stop,
     nativeChatQueued: terminalQueueEnabled ? terminalQueue.controls : structuredNativeChat.queued,
     nativeChatBackgroundTasks: activeChatStructured ? structuredNativeChat.backgroundTasks : null,
     ...workspaceCatalog,
-    handleNativeChatSend: activeChatStructured
-      ? structuredNativeChatSend.send
-      : terminalQueueEnabled
-        ? terminalQueueSend.send
-        : handleNativeChatSend,
-    handleNativeChatSendWithOutcome: activeChatStructured
-      ? structuredNativeChatSend.sendWithOutcome
-      : terminalQueueEnabled
-        ? terminalQueueSend.sendWithOutcome
-        : handleNativeChatSendWithOutcome,
     readSeededLaunchDraft,
     nativeChatSessionOptions,
     nativeChatSessionCommands: nativeChatLane.sessionCommands,

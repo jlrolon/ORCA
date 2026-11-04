@@ -158,3 +158,41 @@ export function useMobileTerminalChatQueue(args: {
         : null
   }
 }
+
+export function terminalQueueComposerFields<
+  TFollowUp,
+  TSend,
+  TOutcome,
+  TBind extends unknown[]
+>(args: {
+  structured: boolean
+  queueEnabled: boolean
+  structuredFollowUp: TFollowUp
+  queueFollowUp: TFollowUp
+  bindSend: (...bind: TBind) => { send: TSend; sendWithOutcome: TOutcome }
+  bind: TBind
+  structuredSend: TSend
+  plainSend: TSend
+  structuredOutcome: TOutcome
+  plainOutcome: TOutcome
+}): {
+  nativeChatSendFollowUp: TFollowUp
+  handleNativeChatSend: TSend
+  handleNativeChatSendWithOutcome: TOutcome
+} {
+  const bound = args.bindSend(...args.bind)
+  const queued = !args.structured && args.queueEnabled
+  return {
+    nativeChatSendFollowUp: args.structured ? args.structuredFollowUp : args.queueFollowUp,
+    handleNativeChatSend: args.structured
+      ? args.structuredSend
+      : queued
+        ? bound.send
+        : args.plainSend,
+    handleNativeChatSendWithOutcome: args.structured
+      ? args.structuredOutcome
+      : queued
+        ? bound.sendWithOutcome
+        : args.plainOutcome
+  }
+}

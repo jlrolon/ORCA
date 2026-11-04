@@ -61,7 +61,7 @@ import { useNativeChatLocalCommandAnswer } from './use-native-chat-local-command
 import { useNativeChatImageRuntimeContext } from './native-chat-image-runtime-context'
 import { handleNativeChatSplitShortcut } from './native-chat-split-shortcut'
 import { formatShortcutLabel } from '@/hooks/useShortcutLabel'
-import { useNativeChatTerminalQueue } from './use-native-chat-terminal-queue'
+import { useNativeChatTerminalQueue, queueSendEpoch } from './use-native-chat-terminal-queue'
 import { NativeChatQueuedMessageList } from './NativeChatQueuedMessageList'
 
 export function NativeChatResolvedView({
@@ -107,8 +107,6 @@ export function NativeChatResolvedView({
   // A coalesced interrupt/restart can stay working; the newer epoch must still clear Stop suppression.
   const workingEpoch = useAppStore((s) => s.agentStatusByPaneKey[paneKey]?.stateStartedAt ?? null)
   const turnEpoch = useAppStore((s) => s.agentStatusByPaneKey[paneKey]?.turnStartedAt ?? null)
-  const sendWorkingEpoch =
-    (session.hookWorking ?? liveWorking) || session.hookAwaitingInput ? turnEpoch : undefined
   const canSend = useNativeChatCanSend(targetPtyId)
   // Share verified composer delivery with prompt answers and ESC-based Stop.
   const send = useNativeChatInteractiveSend(paneKey, targetPtyId, agent)
@@ -119,11 +117,12 @@ export function NativeChatResolvedView({
   const terminalQueue = useNativeChatTerminalQueue({
     paneKey,
     ptyId: targetPtyId,
-    enabled: agent === 'hermes' && isVisible && canSend,
     environmentId: runtimeEnvironmentId,
-    composerRef
+    composerRef,
+    enabled: agent === 'hermes' && isVisible && canSend
   })
   const liveWorking = terminalQueue.working ?? session.status === 'working'
+  const sendWorkingEpoch = queueSendEpoch(session, liveWorking, turnEpoch)
   const [workingInterrupted, setWorkingInterrupted] = useNativeChatWorkingSuppression(
     liveWorking,
     workingEpoch

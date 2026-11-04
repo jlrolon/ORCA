@@ -194,3 +194,11 @@ export function useNativeChatTerminalQueue(args: {
     enqueue
   }
 }
+
+export function queueSendEpoch(
+  session: { hookWorking?: boolean; hookAwaitingInput?: boolean },
+  liveWorking: boolean,
+  turnEpoch: number | null
+): number | null | undefined {
+  return (session.hookWorking ?? liveWorking) || session.hookAwaitingInput ? turnEpoch : undefined
+}
