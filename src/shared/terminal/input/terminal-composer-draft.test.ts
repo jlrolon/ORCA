@@ -128,6 +128,62 @@ describe('detectTerminalComposerDraft', () => {
     expect(detectTerminalComposerDraft(context)).toBeNull()
   })
 
+  it('does not read a dim ghost suggestion as the draft (#38015)', () => {
+    // Claude draws its next-prompt suggestion as dim text after the caret; only
+    // the raw slice sees it. A draft verdict here holds orchestration delivery
+    // until the user types or the input-hold cap passes. The closing rule row
+    // is not typed-continuation evidence either.
+    const ghost = {
+      rows: ['────────', '❯'],
+      typedRows: ['────────', '❯'],
+      promptGlyphBoldRows: [false, false],
+      rowsBelow: ['────────'],
+      typedRowsBelow: ['────────'],
+      beforeCursor: '❯',
+      afterCursor: '',
+      rawAfterCursor: ' Try committing the staged changes',
+      cursorHidden: false,
+      cursorViewportRow: 4
+    }
+    expect(detectTerminalComposerDraft(ghost)).toBeNull()
+  })
+
+  it('still reads a wrapped draft whose only undimmed text sits below the caret', () => {
+    const wrapped = {
+      rows: ['────────', '❯ fix the'],
+      typedRows: ['────────', '❯ fix the'],
+      promptGlyphBoldRows: [false, false],
+      rowsBelow: ['failing test', '────────'],
+      typedRowsBelow: ['failing test', '────────'],
+      rowsBelowWrapped: [true, false],
+      beforeCursor: '❯ fix the',
+      afterCursor: '',
+      rawAfterCursor: '',
+      cursorHidden: false,
+      cursorViewportRow: 4
+    }
+    expect(detectTerminalComposerDraft(wrapped)?.text).toBe('fix thefailing test')
+  })
+
+  it('does not take a status row past the closing frame as draft evidence (#38015)', () => {
+    // typedRowsBelow includes rows below the frame (status lines are undimmed);
+    // the continuation scan stops at the frame, so a ghost suggestion above it
+    // still reads as no draft.
+    const ghostWithStatus = {
+      rows: ['────────', '❯'],
+      typedRows: ['────────', '❯'],
+      promptGlyphBoldRows: [false, false],
+      rowsBelow: ['────────', 'gpt-5.6 \u00b7 ~/repo'],
+      typedRowsBelow: ['────────', 'gpt-5.6 \u00b7 ~/repo'],
+      beforeCursor: '❯',
+      afterCursor: '',
+      rawAfterCursor: ' Try committing the staged changes',
+      cursorHidden: false,
+      cursorViewportRow: 4
+    }
+    expect(detectTerminalComposerDraft(ghostWithStatus)).toBeNull()
+  })
+
   it('keeps a typed draft whose stock placeholder is still rendered to its right', () => {
     // Repaints can leave the placeholder beside typed text; do not mask that user draft.
     const context = {

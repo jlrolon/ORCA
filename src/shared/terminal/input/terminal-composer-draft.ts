@@ -157,7 +157,41 @@ function detectTerminalComposer(
   }
   const cursorIndex = context.rows.length - 1
   const codexFooterIndex = findCodexFooterIndex(context)
-  let afterCursor = typedOnly ? context.afterCursor : context.afterCursor || context.rawAfterCursor
+  // Why the raw fallback only for real evidence: an agent's dim suggestion after the caret
+  // (Claude's ghost prompt) is not a draft, and falling back whenever the undimmed slice is
+  // empty would read it as the user's input, holding delivery until the cap (#38015). The
+  // fallback stays for what it was added for: a wrapped draft's tail below the caret, and a
+  // stock placeholder that the placeholder check can retire.
+  const hasUndimmedAfterCursor = context.afterCursor.trim().length > 0
+  // Same boundary as the continuation walk: a status row below the closing frame
+  // is not part of the composer, so it cannot prove a wrapped draft.
+  const hasTypedContinuationBelow = (() => {
+    for (let index = 0; index < context.typedRowsBelow.length; index += 1) {
+      if (COMPOSER_FRAME_LINE.test(context.rowsBelow[index] ?? '') || index === codexFooterIndex) {
+        return false
+      }
+      if ((context.typedRowsBelow[index] ?? '').trim()) {
+        return true
+      }
+    }
+    return false
+  })()
+  const rawContinuationRows = composerContinuationRows(
+    context,
+    context.rawAfterCursor,
+    codexFooterIndex,
+    false
+  )
+  const rawFallbackEligible =
+    !typedOnly &&
+    !hasUndimmedAfterCursor &&
+    (hasTypedContinuationBelow ||
+      isStockPlaceholder(context.rawAfterCursor, rawContinuationRows))
+  let afterCursor = typedOnly
+    ? context.afterCursor
+    : hasUndimmedAfterCursor || rawFallbackEligible
+      ? context.afterCursor || context.rawAfterCursor
+      : context.afterCursor
   let continuationRows = composerContinuationRows(context, afterCursor, codexFooterIndex, typedOnly)
   // Why: the continuation walk stops at the row that would close the frame; typed-only walks also
   // stop at dim suggestion rows, which still sit inside the frame.
