@@ -1,15 +1,22 @@
-import { memo, useCallback, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, ScrollView, StyleSheet } from 'react-native'
-import { Plus } from 'lucide-react-native'
+import { History, Plus } from 'lucide-react-native'
 import { triggerMediumImpact } from '../platform/haptics'
 import { useMobileTranslation } from '../i18n/use-mobile-translation'
 import { AgentStateDot } from '../components/AgentStateDot'
 import { useNow } from '../hooks/use-now'
-import { agentDotState, type AgentDotState } from '../worktree/agent-row-display'
+import type { AgentDotState } from '../worktree/agent-row-display'
 import {
+  clearLatchedUnreadTabKeys,
   getMobileTerminalTabHostAgentIdentity,
   getMobileSessionTabTitle,
-  resolveMobileTerminalTabAgentId
+  hasPendingWorktreeUnreadForTabCompletion,
+  isMobileSessionTabUnreadBeforeView,
+  latchInitialActiveTabUnread,
+  resolveMobileSessionTabDotState,
+  resolveMobileTerminalTabAgentId,
+  seedUnreadWorktreeSessionTabs,
+  subscribeCatalogWorktreesForTabStatus
 } from './mobile-terminal-tab-agent'
 import { spacing } from '../theme/mobile-theme'
 import { useMobileColorScheme } from '../theme/use-mobile-color-scheme'
@@ -53,6 +60,9 @@ export const MobileSessionTabStrip = memo(function MobileSessionTabStrip({
     connState,
     createTabBusy,
     handleOpenNewTab,
+    showRecentSessionCardsAction,
+    showRecentSessionCards,
+    setShowRecentSessionCards,
     scrollActiveTabIntoView,
     holdTabStripReveal,
     cancelHeldTabStripReveal,
@@ -75,19 +85,98 @@ export const MobileSessionTabStrip = memo(function MobileSessionTabStrip({
     [tabBarKeepsKeyboard]
   )
   const lastTabTapRef = useRef<{ id: string; at: number } | null>(null)
+  const visitUnreadRef = useRef<{
+    worktreeId: string | null | undefined
+    userSwitchedTab: boolean
+    checkedActiveTabIds: Set<string>
+    latchedUnreadTabId: string | null
+  }>({
+    worktreeId: undefined,
+    userSwitchedTab: false,
+    checkedActiveTabIds: new Set(),
+    latchedUnreadTabId: null
+  })
+  if (visitUnreadRef.current.worktreeId !== controller.worktreeId) {
+    if (visitUnreadRef.current.latchedUnreadTabId) {
+      clearLatchedUnreadTabKeys()
+    }
+    visitUnreadRef.current = {
+      worktreeId: controller.worktreeId,
+      userSwitchedTab: false,
+      checkedActiveTabIds: new Set(),
+      latchedUnreadTabId: null
+    }
+  }
+  useEffect(
+    () => () => {
+      if (visitUnreadRef.current.latchedUnreadTabId) {
+        clearLatchedUnreadTabKeys()
+      }
+    },
+    []
+  )
   const now = useNow(60_000)
+  const [catalogRevision, setCatalogRevision] = useState(0)
+  const [visitEpoch, setVisitEpoch] = useState(0)
+  useEffect(
+    () => subscribeCatalogWorktreesForTabStatus(() => setCatalogRevision((rev) => rev + 1)),
+    []
+  )
   const tabStates = useMemo(() => {
+    void catalogRevision
+    void visitEpoch
     const states = new Map<string, AgentDotState>()
+    const visit = visitUnreadRef.current
+    if (
+      visit.latchedUnreadTabId !== null &&
+      activeSessionTabId !== null &&
+      activeSessionTabId !== visit.latchedUnreadTabId
+    ) {
+      visit.userSwitchedTab = true
+      visit.latchedUnreadTabId = null
+      clearLatchedUnreadTabKeys()
+    }
+    if (visibleTabs.length > 0 && hasPendingWorktreeUnreadForTabCompletion(controller.worktreeId)) {
+      seedUnreadWorktreeSessionTabs(controller.worktreeId, visibleTabs, now)
+    }
     for (const tab of visibleTabs) {
-      // Why: a status restored across a host restart is unconfirmed, so like desktop it shows no live state.
-      if (tab.type === 'terminal' && tab.agentStatus && !tab.agentStatus.restoredUnconfirmed) {
-        states.set(tab.id, agentDotState(tab.agentStatus, now))
-      } else if (tab.type === 'agent-session' && tab.chatStatus) {
-        states.set(tab.id, agentDotState(tab.chatStatus, now))
+      const tabId = tab.id
+      const isActive = tabId === activeSessionTabId
+      let state: AgentDotState | undefined
+      if (
+        isActive &&
+        !visit.userSwitchedTab &&
+        !visit.latchedUnreadTabId &&
+        !visit.checkedActiveTabIds.has(tabId)
+      ) {
+        const unreadBeforeView = isMobileSessionTabUnreadBeforeView(tab, now, tabId)
+        state = resolveMobileSessionTabDotState(tab, now, { isActiveOnScreen: true, tabId })
+        if (unreadBeforeView) {
+          visit.latchedUnreadTabId = tabId
+          visit.checkedActiveTabIds.add(tabId)
+          latchInitialActiveTabUnread(tab, tabId)
+        } else if (state !== undefined) {
+          visit.checkedActiveTabIds.add(tabId)
+        }
+      } else {
+        state = resolveMobileSessionTabDotState(tab, now, { isActiveOnScreen: isActive, tabId })
+      }
+      if (!visit.userSwitchedTab && visit.latchedUnreadTabId === tabId) {
+        if (state === 'done') {
+          states.set(tabId, 'unread')
+        } else {
+          visit.latchedUnreadTabId = null
+          clearLatchedUnreadTabKeys()
+          if (state) {
+            states.set(tabId, state)
+          }
+        }
+      } else if (state) {
+        states.set(tabId, state)
       }
     }
     return states
-  }, [visibleTabs, now])
+  }, [visibleTabs, now, activeSessionTabId, catalogRevision, controller.worktreeId, visitEpoch])
   const tabLabels = useMemo(
     () =>
       visibleTabs.map((tab) => {
@@ -123,6 +212,10 @@ export const MobileSessionTabStrip = memo(function MobileSessionTabStrip({
   const rightHint = resolveTabStripEdgeHint(hiddenTabs.right, tabStates)
   const pressTab = useCallback(
     (t: (typeof visibleTabs)[number], source: Parameters<typeof toggleSource>[0]) => {
+      visitUnreadRef.current.userSwitchedTab = true
+      visitUnreadRef.current.latchedUnreadTabId = null
+      clearLatchedUnreadTabKeys()
+      setVisitEpoch((epoch) => epoch + 1)
       const at = Date.now()
       const lastTap = lastTabTapRef.current
       lastTabTapRef.current = { id: t.id, at }
@@ -282,6 +375,17 @@ export const MobileSessionTabStrip = memo(function MobileSessionTabStrip({
             accessibilityLabel={t('session.tabStrip.newTab', 'New tab')}
             icon={Plus}
           />
+          {showRecentSessionCardsAction ? (
+            <NavBarButton
+              active={Boolean(showRecentSessionCards)}
+              onPress={() => {
+                dismiss()
+                setShowRecentSessionCards(true)
+              }}
+              accessibilityLabel={t('recentSessionCardsSectionTitle', 'Recently Used')}
+              icon={History}
+            />
+          ) : null}
         </View>
       ) : null}
     </View>
@@ -291,6 +395,9 @@ export const MobileSessionTabStrip = memo(function MobileSessionTabStrip({
 // The right inset matches the nav bar's, so the + lines up with the ⋯ above it.
 const newTabStyles = StyleSheet.create({
   slot: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
     paddingLeft: spacing.sm,
     paddingRight: spacing.md
   }
