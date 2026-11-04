@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo } from 'react'
 import { useAppStore } from '@/store'
+import { useSidebarGroupCollapseScope } from '@/lib/sidebar-group-collapse'
 import { useShallow } from 'zustand/react/shallow'
 import {
   useAllWorktrees,
@@ -52,12 +53,15 @@ type WorktreeListProps = {
   onWorkspaceBoardDragPreviewCancel?: () => void
 }
 
+const EMPTY_GROUP_KEYS: readonly string[] = []
+
 // Desktop windows consume main’s sidebar inputs; paired web clients derive their own view.
 const useSidebarListModel =
   ORCA_SIDEBAR_INPUTS_IS_MAIN && !isPairedWebClientWindow()
     ? useMainSidebarListModel
     : useWindowSidebarListModel
 
+/** Own the mounted sidebar's bulk-collapse scope, clearing it when filters hide every workspace. */
 const WorktreeList = React.memo(function WorktreeList({
   scrollOffsetRef,
   scrollAnchorRef,
@@ -221,6 +225,9 @@ const WorktreeList = React.memo(function WorktreeList({
     placeholderRepoCount: rowModel.placeholderRepoIds.size,
     importedWorktreeCardCount: externalWorktreeCards.importedWorktreesByRepo.size
   })
+  useSidebarGroupCollapseScope(
+    filtersHideAllRows ? EMPTY_GROUP_KEYS : rowModel.collapsibleGroupKeys
+  )
   // Clear Filters must outrank empty project headers when filtering hides every workspace.
   if (rowModel.rows.length === 0 || filtersHideAllRows) {
     return <SidebarWorktreeListEmptyState hasFilters={hasFilters} onClearFilters={clearFilters} />

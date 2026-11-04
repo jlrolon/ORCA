@@ -8,6 +8,9 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { translate } from '@/i18n/i18n'
+import { useSidebarGroupCollapseAction } from '@/lib/sidebar-group-collapse'
+import { formatOptionalPrimaryShortcutLabel } from '@/hooks/useShortcutLabel'
+import { useAppStore } from '@/store'
 import { useUiLanguageRevision } from '@/i18n/use-ui-language-revision'
 import { OptionsFilterCountBadge } from './options-filter-count-badge'
 import {
@@ -20,12 +23,19 @@ type SidebarWorkspaceOptionsMenuProps = {
   onMenuOpenChange?: (open: boolean) => void
 }
 
+/** Bind workspace options to the mounted list's collapse scope and the user's toggle shortcut. */
 const SidebarWorkspaceOptionsMenu = React.memo(function SidebarWorkspaceOptionsMenu({
   preserveWorkspaceBoardOpen = false,
   onMenuOpenChange
 }: SidebarWorkspaceOptionsMenuProps) {
   useUiLanguageRevision()
   const [open, setOpen] = useState(false)
+  const groupCollapseAction = useSidebarGroupCollapseAction()
+  const keybindings = useAppStore((s) => s.keybindings)
+  const groupCollapseShortcut = formatOptionalPrimaryShortcutLabel(
+    'sidebar.groups.toggleCollapseAll',
+    keybindings
+  )
   const { hasAnyFilter, activeFilterCount } = useWorkspaceOptionsFilterBadge()
 
   const handleOpenChange = useCallback(
@@ -91,7 +101,10 @@ const SidebarWorkspaceOptionsMenu = React.memo(function SidebarWorkspaceOptionsM
         className="w-72 pb-2"
         data-workspace-board-preserve-open={preserveWorkspaceBoardOpen ? '' : undefined}
       >
-        <WorkspaceOptionsMenuItems preserveWorkspaceBoardOpen={preserveWorkspaceBoardOpen} />
+        <WorkspaceOptionsMenuItems
+          preserveWorkspaceBoardOpen={preserveWorkspaceBoardOpen}
+          groupCollapseAction={{ ...groupCollapseAction, shortcutLabel: groupCollapseShortcut }}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   )

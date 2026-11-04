@@ -170,6 +170,25 @@ export function createUiPreferenceActions(set: UISliceSet, get: UISliceGet): Par
         return { collapsedGroups: next }
       }),
 
+    /** Persist the requested groups' collapse state while preserving every key outside that scope. */
+    setGroupsCollapsed: (keys, collapsed) => {
+      if (keys.length === 0) {
+        return
+      }
+      set((s) => {
+        const next = new Set(s.collapsedGroups)
+        for (const key of keys) {
+          if (collapsed) {
+            next.add(key)
+          } else {
+            next.delete(key)
+          }
+        }
+        window.api.ui.set({ collapsedGroups: [...next] }).catch(console.error)
+        return { collapsedGroups: next }
+      })
+    },
+
     worktreeCardProperties: [...DEFAULT_WORKTREE_CARD_PROPERTIES],
     _worktreeCardModeDefaulted: true,
     setWorktreeCardMode: (mode) => {

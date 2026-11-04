@@ -87,6 +87,7 @@ export function useGlobalKeybindings(args: {
       )()
     )
 
+    /** Route physical and double-tap input by focus context, stopping after the first handled action. */
     const dispatchShortcutInput = (input: ShortcutDispatchInput): void => {
       const state = readShortcutState()
       const {
@@ -223,6 +224,12 @@ export function useGlobalKeybindings(args: {
 
       const handlers = createAppCommandHandlers(state, input, context)
       if (matchShortcut('workspace.delete') && handlers.get('workspace.delete')?.()) {
+        return
+      }
+      if (
+        matchShortcut('sidebar.groups.toggleCollapseAll') &&
+        handlers.get('sidebar.groups.toggleCollapseAll')?.()
+      ) {
         return
       }
       if (

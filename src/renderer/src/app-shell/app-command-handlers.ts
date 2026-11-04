@@ -1,6 +1,7 @@
 import { canShowRightSidebarForView } from '@/lib/right-sidebar-visibility'
 import { runBuiltInOrReplacement } from '@/lib/plugin-command-replacements'
 import { isFloatingWorkspacePanelFocused } from '@/lib/floating-workspace-terminal-actions'
+import { createSidebarGroupsCollapseCommand } from './sidebar-groups-collapse-command'
 import { hasVisibleOverlay } from '@/lib/visible-overlay'
 import { requestScrollToCurrentWorkspaceRevealAndRename } from '@/lib/scroll-to-current-workspace-status'
 import { requestVirtualizedScrollAnchorRecord } from '@/hooks/requestVirtualizedScrollAnchorRecord'
@@ -73,6 +74,7 @@ export function getKeybindingContext(target: EventTarget | null): KeybindingCont
     : 'app'
 }
 
+/** Share command guards and claiming across keyboard and programmatic dispatch; true means handled. */
 export function createAppCommandHandlers(
   state: AppShortcutState,
   input?: ShortcutDispatchInput,
@@ -157,6 +159,10 @@ export function createAppCommandHandlers(
             store.setSidebarOpen(true)
           }
         })
+    ],
+    [
+      'sidebar.groups.toggleCollapseAll',
+      createSidebarGroupsCollapseCommand(claim, creationLayoutActive, floatingWorkspaceFocused)
     ],
     [
       'sidebar.childWorkspaces.toggle',
