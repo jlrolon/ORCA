@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { render } from './native-chat-tooltip-test-harness'
 import { useAppStore } from '@/store'
+import { i18n } from '@/i18n/i18n'
 import {
   initialStore,
   from,
@@ -334,8 +335,10 @@ beforeEach(() => {
     }
   )
 })
-afterEach(() => {
+afterEach(async () => {
   cleanup()
+  await i18n.changeLanguage('en')
+  i18n.removeResourceBundle('fr', 'translation')
   useAppStore.setState(initialStore, true)
   vi.restoreAllMocks()
   vi.unstubAllGlobals()

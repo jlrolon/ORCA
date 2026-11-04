@@ -1,6 +1,6 @@
 import { memo, useContext, useState, useRef, useLayoutEffect } from 'react'
 import { Pressable, Text, View } from 'react-native'
-import { ArrowUpRight, Bot, ChevronDown, ChevronUp } from 'lucide-react-native'
+import { ArrowUpRight, Bot, ChevronDown, ChevronUp, Terminal } from 'lucide-react-native'
 import type { NativeChatMessage } from '../../../../../src/shared/native-chat/native-chat-types'
 import type { AgentMessageSource } from '../../../../../src/shared/agent-session/agent-session-message-source'
 import { agentMessageSendersShown } from '../../../../../src/shared/agent-session/agent-session-message-source'
@@ -10,6 +10,7 @@ import {
   agentMessageIsCompact,
   agentMessagePrimarySender,
   agentMessageSenderCanOpen,
+  agentMessageSenderIsNamedSource,
   agentMessageOverflows,
   agentMessageFoldLabel,
   agentMessageCanCopy,
@@ -261,15 +262,18 @@ function SenderAvatar({
   sender: AgentMessageSource['senders'][number] | undefined
   compact?: boolean
 }) {
-  const view = useMobileAgentMessageView(sender)
+  const namedSource = agentMessageSenderIsNamedSource(sender)
+  const view = useMobileAgentMessageView(namedSource ? undefined : sender)
   return (
     <View style={[styles.avatar, compact && styles.compactAvatar]}>
-      {view.agentType ? (
+      {namedSource ? (
+        <Terminal size={16} color={colors.textMuted} />
+      ) : view.agentType ? (
         <MobileAgentIcon agentId={view.agentType} size={16} />
       ) : (
         <Bot size={16} color={colors.textMuted} />
       )}
-      {view.dot && view.dot !== 'permission' ? (
+      {!namedSource && view.dot && view.dot !== 'permission' ? (
         <View style={styles.glyph}>
           <AgentStateDot state={view.dot} />
         </View>
