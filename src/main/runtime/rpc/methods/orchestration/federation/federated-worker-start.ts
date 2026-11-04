@@ -2,18 +2,14 @@ import type { FederatedWorkerStartRequest } from './federated-worker-start-reque
 import { isTuiAgent } from '../../../../../../shared/agent-launch/catalog/tui-agent-config'
 import type { RuntimeStatus } from '../../../../../../shared/runtime-types'
 import {
-  ORCHESTRATION_CONTRACT_RUNTIME_CAPABILITY,
   ORCHESTRATION_FEDERATION_CONTROL_MAIL_PROTOCOL_VERSION,
   ORCHESTRATION_FEDERATION_CONTROL_MAIL_RUNTIME_CAPABILITY,
   ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION,
   ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_RUNTIME_CAPABILITY,
-  ORCHESTRATION_FEDERATION_RUNTIME_CAPABILITY,
   ORCHESTRATION_WORKER_TURN_STOP_REPORTS_RUNTIME_CAPABILITY
 } from '../../../../../../shared/protocol-version'
-import { orchestrationMigrationData } from '../../../../../../shared/orchestration-rpc-contract'
 import { OrchestrationError } from '../../../../orchestration/orchestration-error'
 import {
-  assertWorkerLaunchPreferencesRuntimeSupported,
   assertWorkerLaunchPreferencesCreateTerminal,
   createPendingWorkerLaunchReceipt,
   resolveFederatedWorkerLaunchReceipt
@@ -34,6 +30,11 @@ import {
 import { releaseRetriedWorkerTerminal } from '../worker/retried-worker-terminal-release'
 import { withWorkerStartNext } from '../receipt-next'
 import { recordReadyFederatedDispatch } from './federated-worker-ready-record'
+import {
+  assertFederatedWorkerServerCapabilities,
+  resolveFederatedWorkerAgent
+} from './federated-worker-default-agent'
+import { retriedWorkerDefaultAgent } from '../worker/retried-worker-default-agent'
 import { prepareWorkerStartCard } from '../../../../orchestration/worker-start-card'
 import {
   recordWorkerLaunchObservation,
@@ -65,11 +66,6 @@ export async function startFederatedWorker(args: FederatedWorkerStartRequest): P
   const createsWorktree = worktree === 'new-top-level'
   assertWorkerLaunchPreferencesCreateTerminal(params)
   validateFederatedWorkerStartPlacement(params, createsWorktree)
-  const requestedLaunch = createPendingWorkerLaunchReceipt({
-    agent: isTuiAgent(params.agent) ? params.agent : null,
-    model: params.model,
-    effort: params.effort
-  })
   const server = runtime.resolveOrchestrationWorkerServer(params.on as string)
   const pairingFence = { expectedEnvironmentPairingRevision: server.pairingRevision }
   const budgets = resolveFederatedWorkerStartBudgets(params.timeoutMs)
@@ -81,24 +77,27 @@ export async function startFederatedWorker(args: FederatedWorkerStartRequest): P
     undefined,
     pairingFence
   )) as RuntimeStatus
-  if (!status.capabilities?.includes(ORCHESTRATION_CONTRACT_RUNTIME_CAPABILITY)) {
-    throw new OrchestrationError(
-      'orchestration_migration_required',
-      `Connected server ${server.name} does not support the current orchestration contract. No effects were applied.`,
-      orchestrationMigrationData('runtime_capability_missing')
-    )
-  }
-  if (!status.capabilities?.includes(ORCHESTRATION_FEDERATION_RUNTIME_CAPABILITY)) {
-    throw new OrchestrationError(
-      'capability_unsupported',
-      `Connected server ${server.name} does not support orchestration federation.`
-    )
-  }
-  assertWorkerLaunchPreferencesRuntimeSupported({
+  assertFederatedWorkerServerCapabilities({
     model: params.model,
     effort: params.effort,
     capabilities: status.capabilities,
     serverName: server.name
+  })
+  const retried = retriedWorkerDefaultAgent(db, params)
+  const { agent: resolvedAgent, selection: agentSelection } = await resolveFederatedWorkerAgent({
+    runtime,
+    params: retried ? { ...params, agent: retried.agent } : params,
+    retriedSelection: retried?.selection,
+    server,
+    worktree,
+    createsWorktree,
+    capabilities: status.capabilities,
+    preflightTimeoutMs: budgets.preflightTimeoutMs
+  })
+  const requestedLaunch = createPendingWorkerLaunchReceipt({
+    agent: isTuiAgent(resolvedAgent) ? resolvedAgent : null,
+    model: params.model,
+    effort: params.effort
   })
   const supportsControlMail = status.capabilities?.includes(
     ORCHESTRATION_FEDERATION_CONTROL_MAIL_RUNTIME_CAPABILITY
@@ -131,7 +130,8 @@ export async function startFederatedWorker(args: FederatedWorkerStartRequest): P
       repo: params.repo ?? null,
       baseBranch: params.baseBranch ?? null,
       terminal: params.terminal ?? null,
-      agent: params.agent ?? null,
+      agent: resolvedAgent ?? null,
+      agentSelection: agentSelection ?? null,
       launch: requestedLaunch,
       timeoutMs: budgets.readinessTimeoutMs,
       setup: setupDecision,
@@ -184,7 +184,7 @@ export async function startFederatedWorker(args: FederatedWorkerStartRequest): P
               : 'orchestration_default'
             : undefined,
           terminal: params.terminal,
-          agent: params.agent,
+          agent: resolvedAgent,
           model: params.model,
           effort: params.effort,
           timeoutMs: budgets.readinessTimeoutMs,
@@ -224,6 +224,7 @@ export async function startFederatedWorker(args: FederatedWorkerStartRequest): P
           server: { environmentId: server.environmentId, name: server.name },
           setup: remote.setup,
           launch,
+          ...(agentSelection ? { agentSelection } : {}),
           timeoutMs: budgets.readinessTimeoutMs,
           effects: remote.effects ?? [],
           residualResources: remote.residualResources ?? []
@@ -242,7 +243,7 @@ export async function startFederatedWorker(args: FederatedWorkerStartRequest): P
         remote.failedStage ?? 'remote_attach',
         remote.lastError ?? 'The worker server reported an unknown start outcome.'
       )
-      return federatedUnknownReceipt(worker, taskForRemote.id, server.name, launch)
+      return federatedUnknownReceipt(worker, taskForRemote.id, server.name, launch, agentSelection)
     } else {
       const worker = db.failWorkerStart(
         started.dispatch.id,
@@ -252,6 +253,7 @@ export async function startFederatedWorker(args: FederatedWorkerStartRequest): P
       return federatedFailedReceipt(worker, { runId, taskId: taskForRemote.id }, server, {
         setup: remote.setup,
         launch,
+        agentSelection,
         effects: remote.effects,
         residualResources: remote.residualResources
       })
@@ -261,11 +263,18 @@ export async function startFederatedWorker(args: FederatedWorkerStartRequest): P
     if (error instanceof OrchestrationError && isKnownRemoteStartFailure(error.code)) {
       const worker = db.failWorkerStart(started.dispatch.id, 'remote_attach', reason)
       return federatedFailedReceipt(worker, { runId, taskId: taskForRemote.id }, server, {
-        launch: requestedLaunch
+        launch: requestedLaunch,
+        agentSelection
       })
     }
     const worker = db.markWorkerStartUnknown(started.dispatch.id, 'remote_attach', reason)
-    return federatedUnknownReceipt(worker, taskForRemote.id, server.name, requestedLaunch)
+    return federatedUnknownReceipt(
+      worker,
+      taskForRemote.id,
+      server.name,
+      requestedLaunch,
+      agentSelection
+    )
   }
   if (!params.terminal) {
     recordStart({
