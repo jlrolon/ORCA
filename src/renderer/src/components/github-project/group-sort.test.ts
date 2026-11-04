@@ -61,7 +61,8 @@ const numberField: GitHubProjectField = {
 function makeRow(
   id: string,
   position: number,
-  values: GitHubProjectRow['fieldValuesByFieldId']
+  values: GitHubProjectRow['fieldValuesByFieldId'],
+  parentIssue: GitHubProjectRow['content']['parentIssue'] = null
 ): GitHubProjectRow {
   return {
     id,
@@ -77,7 +78,7 @@ function makeRow(
       repository: 'acme/repo',
       assignees: [],
       labels: [],
-      parentIssue: null,
+      parentIssue,
       issueType: null
     },
     fieldValuesByFieldId: values,
@@ -357,6 +358,41 @@ describe('groupRows', () => {
     ]
     const groups = groupRows(makeTable(view, rows), rows)
     expect(groups.map((g) => g.key)).toEqual(['opt_a', '__empty__'])
+  })
+
+  it('groups a Parent issue field by content.parentIssue, which carries no field value (#38099)', () => {
+    const parentIssueField: GitHubProjectField = {
+      kind: 'field',
+      id: 'F_parent',
+      name: 'Parent issue',
+      dataType: 'PARENT_ISSUE'
+    }
+    const view = { ...makeView(parentIssueField), groupByFields: [parentIssueField] }
+    const parentA = {
+      number: 101,
+      title: 'Parent A',
+      url: 'https://github.com/acme/repo/issues/101'
+    }
+    const parentB = {
+      number: 102,
+      title: 'Parent B',
+      url: 'https://github.com/acme/repo/issues/102'
+    }
+    // GitHub returns no field value for this field, so every row's fieldValuesByFieldId is empty.
+    const rows = [
+      makeRow('child-a', 0, {}, parentA),
+      makeRow('child-b', 1, {}, parentB),
+      makeRow('child-a2', 2, {}, parentA),
+      makeRow('orphan', 3, {})
+    ]
+
+    const groups = groupRows(makeTable(view, rows), rows)
+
+    expect(groups.map((group) => [group.label, group.rows.map((r) => r.id)])).toEqual([
+      ['#101', ['child-a', 'child-a2']],
+      ['#102', ['child-b']],
+      ['No Parent issue', ['orphan']]
+    ])
   })
 })
 
