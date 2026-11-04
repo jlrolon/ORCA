@@ -1,4 +1,5 @@
 import { isRemoteRuntimePtyId } from '../../../../../shared/remote-runtime/remote-runtime-pty-id'
+import { advanceTerminalEscapeBoundary } from '../../../../../shared/terminal-partial-escape-tail'
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
 type DeliveredChunk = {
@@ -38,7 +39,13 @@ export function admitResumedAppChunk(
         mappable && endSeq !== undefined ? endSeq - (whole ? rawLength : data.length) : undefined,
       mappable,
       // The label describes main's first delivered byte only.
-      gapEscapeState: whole ? delivered.gapEscapeState : undefined
+      gapEscapeState: whole ? delivered.gapEscapeState : undefined,
+      cutEscape: exactSuffix
+        ? advanceTerminalEscapeBoundary(
+            delivered.gapEscapeState ?? '',
+            delivered.data.slice(0, delivered.data.length - data.length)
+          )
+        : ''
     },
     {
       paintedSeq:
