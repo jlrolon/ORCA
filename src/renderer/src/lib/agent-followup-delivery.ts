@@ -6,6 +6,8 @@ import {
   isExpectedAgentProcess
 } from '../../../shared/agent-process-recognition'
 import { isShellProcess } from '../../../shared/shell-process-detection'
+import { noticeGeneratedInputFailure } from './launch-agent-paste-timeout-notice'
+import { GENERATED_AGENT_INPUT_TIMEOUT_MS } from '../../../shared/generated-agent-input-readiness'
 
 export async function sendFollowupPromptWhenAgentReady(args: {
   ptyId: string
@@ -14,7 +16,9 @@ export async function sendFollowupPromptWhenAgentReady(args: {
   prompt: string
 }): Promise<boolean> {
   const { ptyId, agent, expectedProcess, prompt } = args
+  const deadline = Date.now() + GENERATED_AGENT_INPUT_TIMEOUT_MS
   if (!(await waitForAgentForeground(ptyId, expectedProcess))) {
+    noticeGeneratedInputFailure({ agent, text: prompt })
     return false
   }
   // Why: an agent in front may not read input yet; Kimi drops text typed before its composer is up (#10336).
@@ -25,10 +29,13 @@ export async function sendFollowupPromptWhenAgentReady(args: {
       agent,
       submit: true,
       forcePaste: true,
-      // An agent that exited during the readiness wait must not have its prompt pasted into the shell.
-      beforePaste: () => agentHoldsPty(ptyId, expectedProcess, true)
+      timeoutMs: Math.max(0, deadline - Date.now()),
+      // Every frame needs this agent (or its wrapper with a child) still in front: one that exited
+      // or was replaced during the wait never gets its prompt.
+      requireConsumer: true
     })
   } catch {
+    noticeGeneratedInputFailure({ agent, text: prompt, certainty: 'unconfirmed' })
     return false
   }
 }

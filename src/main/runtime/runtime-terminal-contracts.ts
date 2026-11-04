@@ -20,6 +20,7 @@ import type {
   RuntimeTerminalWait,
   RuntimeTerminalWaitCondition
 } from '../../shared/runtime-types'
+import type { GeneratedInputLifetime } from '../../shared/generated-input-lifetime'
 import type { TuiAgent } from '../../shared/agent-launch/catalog/tui-agent'
 import type { WorktreeStartupLaunch } from '../../shared/worktree/launch-types'
 import type { RuntimeTerminalSend } from '../../shared/runtime-terminal-contracts'
@@ -288,6 +289,25 @@ export type RuntimeAgentPromptWriteOptions = Omit<RuntimeTerminalWriteOptions, '
   promptForSchedule?: string
   /** Caller observed composer input acceptance; schedule Enter using desktop draft-paste timing instead of render settlement. */
   composerReady?: boolean
+  /** Admission, queue residency and every later frame share the operation's one deadline. */
+  inputDeadline?: number
+  /** The agent the caller expects; the PTY's resolved agent wins. */
+  generatedAgent?: TuiAgent | null
+  /** False stages an unsubmitted draft: paste only, no Enter, no turn observation. */
+  submit?: boolean
+  /** Typed bytes and a separate Enter (WSL, SSH to Windows) instead of a bracketed paste. */
+  framing?: 'paste' | 'typed'
+  /** A launch's readiness wait already saw the composer; admission still applies every veto. */
+  observedReady?: boolean
+  /** startup waits for positive readiness; running (the default) refuses only on blocking evidence. */
+  generatedIntent?: 'startup' | 'running'
+  /** The request's one lifetime from its acceptance (set by the public entry, in process only). */
+  generatedLifetime?: GeneratedInputLifetime
+  /** The definite input outcome once a frame may have been written, before optional retries
+   *  and turn observation. */
+  onGeneratedOutcome?: (outcome: 'delivered' | 'staged' | 'unconfirmed') => void
+  /** Every frame needs the expected consumer (or a wrapper with a child) in front. */
+  requireConsumer?: boolean
   /** See buildAgentPromptPasteBytes. */
   leadLine?: string
   /** Return an accepted receipt as soon as input lands, instead of waiting for the turn. */
@@ -301,6 +321,7 @@ export type RuntimeAgentPromptWriteOptions = Omit<RuntimeTerminalWriteOptions, '
   expectedBinding?: AgentPromptExpectedBinding
   /** Run on accepted Enter write, including OMP paste framing; later abort cannot undo submitted text. */
   onSubmitWritten?: () => void
+  onPasteWritten?: () => void
 }
 
 export type AgentPromptExpectedBinding = { ptyId: string; processIncarnation: string }

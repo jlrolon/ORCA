@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { withFreshOmpLaunch } from './agent-launch/startup/omp-fresh-launch'
 import { buildAgentDraftLaunchPlan } from './agent-launch/startup/tui-agent-startup'
 import { detectExplicitPiAgentKindFromCommand } from './pi-agent-kind'
-import { recognizeAgentProcessFromCommandLine } from './agent-process-recognition'
+import {
+  isExpectedAgentProcess,
+  recognizeAgentProcessFromCommandLine
+} from './agent-process-recognition'
 
 describe('agent process recognition', () => {
   it.each([
@@ -21,6 +24,13 @@ describe('agent process recognition', () => {
         ?.agent
     ).toBe('dsb')
     expect(recognizeAgentProcessFromCommandLine(`${shim} agent`)?.agent).toBe('dsb')
+  })
+
+  // A packaged or versioned agent binary counts as that agent for the expected-agent check.
+  it('expects a packaged or versioned agent binary as that agent', () => {
+    expect(isExpectedAgentProcess('codex-aarch64-ap', 'codex')).toBe(true)
+    expect(isExpectedAgentProcess('grok-0.2.51', 'grok')).toBe(true)
+    expect(isExpectedAgentProcess('codex-aarch64-ap', 'claude')).toBe(false)
   })
 
   it.each(['posix', 'powershell', 'cmd'] as const)(

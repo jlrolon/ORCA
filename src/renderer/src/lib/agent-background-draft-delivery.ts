@@ -12,6 +12,7 @@ export function scheduleAgentBackgroundDraft(
     content,
     agent,
     submit: true,
-    onTimeout: () => showAutomationPromptNotSentToast(agent)
+    onTimeout: (certainty, retained) =>
+      showAutomationPromptNotSentToast(agent, content, certainty, retained)
   })
 }

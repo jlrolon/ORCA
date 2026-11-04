@@ -1,3 +1,4 @@
+import { showGeneratedInputNotice } from './launch-agent-paste-timeout-notice'
 import type { AgentLaunchChoices } from '../../../shared/agent-launch/choices/agent-launch-choices'
 import { structuredAgentLabel } from './agent-session/launch/structured-agent-session-launch-label'
 import type { SessionOptionValue } from '../../../shared/native-chat/input/native-chat-session-options'
@@ -130,10 +131,14 @@ export async function launchAgentInWebHostTab(args: {
   const handleCreation = ({
     outcome,
     promptDelivered,
+    promptCertainty = 'unconfirmed',
+    promptNoticeRetained,
     hostTabId
   }: {
     outcome: Awaited<ReturnType<typeof createWebRuntimeSessionTerminal>>
     promptDelivered: boolean
+    promptCertainty?: 'not-sent' | 'unconfirmed'
+    promptNoticeRetained?: true
     hostTabId?: string
   }): { delivered: boolean; failureNotified: boolean } & AgentTerminalLaunchCompletion => {
     if (outcome.status === 'failed') {
@@ -147,14 +152,14 @@ export async function launchAgentInWebHostTab(args: {
       onPromptDelivered?.()
     }
     const failureNotified = hasPrompt && !promptDelivered
-    if (failureNotified) {
-      toast.error(
-        translate(
-          'agentLaunch.terminalPromptFailed',
-          'Orca opened a terminal for {{value0}}, but could not pass it your prompt. Send the prompt in that terminal.',
-          { value0: structuredAgentLabel(agent) }
-        )
-      )
+    // The host's retained notice already says this failure.
+    if (failureNotified && !promptNoticeRetained) {
+      showGeneratedInputNotice({
+        agent,
+        text: args.prompt ?? '',
+        certainty: promptCertainty,
+        submitted: pastePromptAfterReady === null || submitPastedPrompt
+      })
     }
     return {
       delivered: promptDelivered,

@@ -11,6 +11,15 @@ vi.mock('@/lib/agent-paste-draft', () => ({
   pasteDraftToAgentPtyWhenReady: vi.fn()
 }))
 
+// The notice a producer reports; this window's runtime is absent here, so it shows directly.
+vi.mock('./launch-agent-paste-timeout-notice', () => {
+  const showGeneratedInputNotice = vi.fn()
+  return {
+    showGeneratedInputNotice,
+    noticeGeneratedInputFailure: (args: unknown) => showGeneratedInputNotice(args)
+  }
+})
+
 // Pip console-script agents expose python/python3 foreground comm rather than their agent name.
 const INTERPRETER_WRAPPED_AGENTS = [
   { agent: 'aider', expectedProcess: TUI_AGENT_CONFIG.aider.expectedProcess }
@@ -105,22 +114,21 @@ describe('sendFollowupPromptWhenAgentReady — interpreter-wrapped agents', () =
     })
   }
 
-  it('pastes nothing when the agent left the terminal during the readiness wait', async () => {
-    vi.mocked(inspectRuntimeTerminalProcess)
-      .mockResolvedValueOnce({ foregroundProcess: 'aider', hasChildProcesses: true })
-      .mockResolvedValue({ foregroundProcess: 'zsh', hasChildProcesses: false })
-    // Run the real last check the paste would make once the composer reads ready.
-    vi.mocked(pasteDraftToAgentPtyWhenReady).mockImplementation(async ({ beforePaste }) =>
-      beforePaste ? await beforePaste() : true
-    )
-
-    const delivered = await sendFollowupPromptWhenAgentReady({
+  // The consumer check now rides every frame of the operation (contract suite: exit and change).
+  it('asks the operation to keep the expected agent in front for every frame', async () => {
+    vi.mocked(inspectRuntimeTerminalProcess).mockResolvedValue({
+      foregroundProcess: 'aider',
+      hasChildProcesses: true
+    })
+    vi.mocked(pasteDraftToAgentPtyWhenReady).mockResolvedValue(true)
+    await sendFollowupPromptWhenAgentReady({
       ptyId: 'pty-1',
       agent: 'aider',
       expectedProcess: 'aider',
       prompt: 'ship it'
     })
-
-    expect(delivered).toBe(false)
+    expect(pasteDraftToAgentPtyWhenReady).toHaveBeenCalledWith(
+      expect.objectContaining({ requireConsumer: true })
+    )
   })
 })

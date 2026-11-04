@@ -3,10 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExecutionHostId } from '../../shared/execution-host'
 import type { AutomationRun } from '../../shared/automations-types'
 import type { RuntimeTerminalCreate } from '../../shared/runtime-terminal-create-contract'
+import type { GeneratedInputOutcome } from '../../shared/generated-terminal-input'
 import { launchHeadlessAutomationAgent } from './headless-automation-agent-launch'
 
 const { deliverTerminalAgentLaunchPrompt } = vi.hoisted(() => ({
-  deliverTerminalAgentLaunchPrompt: vi.fn(async (_args: Record<string, unknown>) => true)
+  deliverTerminalAgentLaunchPrompt: vi.fn(
+    async (_args: { onOutcome?: (outcome: GeneratedInputOutcome) => void }) => true
+  )
 }))
 vi.mock('../runtime/rpc/methods/agent-launch-terminal-prompt', () => ({
   deliverTerminalAgentLaunchPrompt
@@ -429,7 +432,8 @@ describe('headless automation agent launch', () => {
       agent: 'claude',
       freshLaunch: false,
       text: 'fix the flaky test',
-      unprovableHost: 'write-unless-shell'
+      unprovableHost: 'write-unless-shell',
+      onOutcome: expect.any(Function)
     })
     expect(runtime.launchAgentTerminal).not.toHaveBeenCalled()
     expect(launched).toEqual({
@@ -442,16 +446,34 @@ describe('headless automation agent launch', () => {
     })
   })
 
-  it('launches fresh when the idle agent did not take the prompt', async () => {
+  it('launches fresh only when the reused terminal was gone before any write', async () => {
     const runtime = harness()
-    deliverTerminalAgentLaunchPrompt.mockResolvedValue(false)
+    deliverTerminalAgentLaunchPrompt.mockImplementation(async (args) => {
+      args.onOutcome?.('target-gone')
+      return false
+    })
 
     const launched = await launch(runtime, { reuseSession: true }, [previousRun()])
 
-    expect(deliverTerminalAgentLaunchPrompt).toHaveBeenCalledTimes(1)
     expect(runtime.launchAgentTerminal).toHaveBeenCalledTimes(1)
     expect(launched.terminalHandle).toBe('term_existing')
   })
+
+  it.each(['not-sent', 'unconfirmed'] as const)(
+    'fails the run instead of sending the prompt to a second session when it was %s',
+    async (outcome) => {
+      const runtime = harness()
+      deliverTerminalAgentLaunchPrompt.mockImplementation(async (args) => {
+        args.onOutcome?.(outcome)
+        return false
+      })
+
+      await expect(launch(runtime, { reuseSession: true }, [previousRun()])).rejects.toThrow(
+        /Claude/
+      )
+      expect(runtime.launchAgentTerminal).not.toHaveBeenCalled()
+    }
+  )
 
   it.each([
     ['its pane now holds another PTY', { ptyId: 'pty-restarted' }],

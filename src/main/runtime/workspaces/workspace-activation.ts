@@ -1,3 +1,5 @@
+import { captureGeneratedInputRecovery } from '../generated-agent-input-notices'
+import { deliverGeneratedTerminalInput } from '../terminal/input/generated-terminal-input-delivery'
 import { OrcaRuntimeWithForegroundInspection } from './workspace-foreground-inspection'
 import {
   type RuntimeNavigationTarget,
@@ -29,7 +31,7 @@ import type {
 import { recordCreatedWorktreeLineage as recordCreatedWorktreeLineageState } from '../runtime-worktree-lineage-recording'
 import {
   deliverStartupFollowupPrompt,
-  pasteWorktreeStartupDraftWhenReady,
+  generatedInputRefusalCertainty,
   type StartupFollowupPromptOptions,
   type WorktreeStartupReadinessHost
 } from '../runtime-worktree-startup-readiness'
@@ -203,8 +205,20 @@ export abstract class OrcaRuntimeWithActivateManagedWorktree extends OrcaRuntime
     return recordCreatedWorktreeLineageState(this.store, worktree, lineageResolution)
   }
 
+  /** Detached: creation already succeeded, so a refusal becomes this runtime's recovery notice. */
   protected pasteStartupDraftWhenReady(handle: string, draft: WorktreeStartupDraftPaste): void {
-    pasteWorktreeStartupDraftWhenReady(this.getWorktreeStartupReadinessHost(), handle, draft)
+    const recover = captureGeneratedInputRecovery(this, handle, draft.agent, draft.content, false)
+    void deliverGeneratedTerminalInput(this, handle, {
+      text: draft.content,
+      submit: false,
+      agent: draft.agent,
+      intent: 'startup'
+    }).then((outcome) => {
+      const refused = generatedInputRefusalCertainty(outcome)
+      if (refused) {
+        recover(refused)
+      }
+    })
   }
 
   /** Before first input only: await composer readiness without startup dialogs or Codex provisional headers. stopOnDialog returns early for the caller's idle report. */
@@ -255,7 +269,16 @@ export abstract class OrcaRuntimeWithActivateManagedWorktree extends OrcaRuntime
     options?: StartupFollowupPromptOptions
   ): Promise<boolean> {
     const host = this.getWorktreeStartupReadinessHost()
-    return deliverStartupFollowupPrompt(this, host, handle, followup, options)
+    const recover = options?.agentLaunch
+      ? null
+      : captureGeneratedInputRecovery(this, handle, followup.agent, followup.prompt)
+    return deliverStartupFollowupPrompt(this, host, handle, followup, {
+      ...options,
+      onRefused: (certainty) => {
+        options?.onRefused?.(certainty)
+        recover?.(certainty)
+      }
+    })
   }
 
   async provisionManagedWorktreeTerminals(

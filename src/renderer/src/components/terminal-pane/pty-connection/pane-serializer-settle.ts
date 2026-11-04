@@ -1,16 +1,10 @@
 import { isRemoteRuntimePtyId } from '../../../../../shared/remote-runtime/remote-runtime-pty-id'
 import type { SessionRestoredBannerReason } from '../session-restored-banner-pane-state'
 import { hasPtySerializer } from '../pty-buffer-serializer'
-import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspection'
 import { waitForTerminalOutputParsed } from '@/lib/pane-manager/pane-terminal-output-scheduler'
-import { isExpectedAgentProcess } from '../../../../../shared/agent-process-recognition'
-import { resolveDraftPasteReadyTimeoutMs } from '../../../../../shared/draft-paste-ready-timeout'
-import { createDraftPasteReadyScanner } from '../../../../../shared/draft-paste-ready-scanner'
-import { sendAgentDraftPasteContent } from '@/lib/agent-draft-paste-content'
-import { writeTerminalPastePtyInput } from '../terminal-pty-paste-writer'
+import { GENERATED_AGENT_INPUT_TIMEOUT_MS } from '../../../../../shared/generated-agent-input-readiness'
+import { deliverGeneratedPaste } from '@/lib/agent-paste-draft'
 import { createPasteReadinessTimeoutNotice } from '@/lib/launch-agent-paste-timeout-notice'
-
-import { STARTUP_DRAFT_PASTE_QUIET_MS } from './pty-connect-limits'
 
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
@@ -63,154 +57,79 @@ export function bindSettlePaneSerializer(session: ConnectPanePtySession): void {
       : null
     : null
   const startupSource = session.paneStartup?.resumeSource
-  const startupDraftReadyScanner = session.ownsStartupDraftPaste
-    ? createDraftPasteReadyScanner(
-        session.startupDraftAgentConfig?.draftPasteReadySignal ??
-          'render-quiet-after-bracketed-paste'
-      )
-    : null
-  let startupDraftReadinessArmed = false
-  let startupDraftPasteSettled = !session.ownsStartupDraftPaste
-  let startupDraftPasteInFlight = false
-  let startupDraftInputRecorded = false
-  let startupDraftQuietTimer: ReturnType<typeof setTimeout> | null = null
-  let startupDraftHardTimer: ReturnType<typeof setTimeout> | null = null
-  const clearStartupDraftPasteTimers = (): void => {
-    if (startupDraftQuietTimer !== null) {
-      clearTimeout(startupDraftQuietTimer)
-      startupDraftQuietTimer = null
-    }
-    if (startupDraftHardTimer !== null) {
-      clearTimeout(startupDraftHardTimer)
-      startupDraftHardTimer = null
-    }
-  }
-  session.cleanupStartupDraftPasteTimers = clearStartupDraftPasteTimers
-  const getStartupDraftPtyId = (): string | null => {
-    const ptyId = session.transport.getPtyId()
-    if (
-      !ptyId ||
-      startupSource?.cancelled ||
-      session.disposed ||
-      session.deps.paneTransportsRef.current.get(session.pane.id) !== session.transport
-    ) {
-      return null
-    }
-    return ptyId
-  }
-  const sendStartupDraftPaste = (): void => {
-    if (
-      !session.startupDraftPrompt ||
-      startupDraftPasteSettled ||
-      startupDraftPasteInFlight ||
-      !startupDraftReadinessArmed
-    ) {
+  let armed = false
+  let settled = !session.ownsStartupDraftPaste
+  let handedOff = false
+  const recover = (certainty: 'not-sent' | 'unconfirmed', retained = false): void => {
+    if (settled) {
       return
     }
-    const ptyId = getStartupDraftPtyId()
-    if (!ptyId) {
-      return
-    }
-    startupDraftPasteInFlight = true
-    startupDraftPasteSettled = true
+    settled = true
     session.startupDraftPasteAttempted = true
-    session.cleanupStartupDraftPasteTimers()
-    // Share the transport queue with focus replies so ConPTY cannot race CSI I into the draft as a literal prefix.
-    void sendAgentDraftPasteContent(ptyId, session.startupDraftPrompt, 'launch', async (data) => {
-      if (getStartupDraftPtyId() !== ptyId) {
-        return false
-      }
-      const accepted = await writeTerminalPastePtyInput(session.transport, data, 'launch')
-      if (accepted && !startupDraftInputRecorded) {
-        // Transport paste bypasses xterm’s input signal; record it so hibernation cannot discard the composed draft.
-        startupDraftInputRecorded = true
+    const content = session.startupDraftPrompt
+    session.startupDraftPrompt = null
+    if (content && session.startupDraftAgent) {
+      createPasteReadinessTimeoutNotice({
+        worktreeId: session.deps.worktreeId,
+        tabId: session.deps.tabId,
+        agent: session.startupDraftAgent,
+        submitted: false,
+        content
+      }).onTimeout(certainty, retained)
+    }
+  }
+  // Once handed to the host the draft outlives this pane: parking or closing it does not cancel.
+  session.cleanupStartupDraftPasteTimers = (): void => {
+    if (!handedOff) {
+      recover('not-sent')
+    }
+  }
+  const currentPty = (): string | null => {
+    return !session.disposed &&
+      !startupSource?.cancelled &&
+      session.deps.paneTransportsRef.current.get(session.pane.id) === session.transport
+      ? session.transport.getPtyId()
+      : null
+  }
+  // The host that owns the PTY waits for the agent and stages the draft in one transaction.
+  const begin = (): void => {
+    const ptyId = currentPty()
+    if (!armed || handedOff || settled || !ptyId) {
+      return
+    }
+    handedOff = true
+    const content = session.startupDraftPrompt
+    if (!content) {
+      settled = true
+      return
+    }
+    session.startupDraftPasteAttempted = true
+    let retained = false
+    void deliverGeneratedPaste({
+      ptyId,
+      content,
+      submit: false,
+      agent: session.startupDraftAgent ?? undefined,
+      inputKind: 'launch',
+      intent: 'startup',
+      deadline: Date.now() + GENERATED_AGENT_INPUT_TIMEOUT_MS,
+      onNoticeRetained: () => (retained = true)
+    }).then((outcome) => {
+      if (outcome === 'staged' || outcome === 'delivered') {
+        settled = true
+        session.startupDraftPrompt = null
+        // Transport-free paste bypasses xterm's input signal; record it so hibernation keeps the draft.
         session.recordTerminalInputForHibernation()
+        return
       }
-      return accepted
+      recover(outcome === 'unconfirmed' ? 'unconfirmed' : 'not-sent', retained)
     })
-      .catch(() => false)
-      .finally(() => {
-        startupDraftPasteInFlight = false
-      })
-  }
-  const deliverStartupDraftIfAgentOwnsPty = async (): Promise<void> => {
-    if (!session.startupDraftAgentConfig || startupDraftPasteSettled) {
-      return
-    }
-    const ptyId = getStartupDraftPtyId()
-    if (!ptyId) {
-      return
-    }
-    try {
-      const process = await inspectRuntimeTerminalProcess(ptyId)
-      const foreground = process.foregroundProcess?.toLowerCase() ?? ''
-      if (
-        getStartupDraftPtyId() === ptyId &&
-        isExpectedAgentProcess(foreground, session.startupDraftAgentConfig.expectedProcess)
-      ) {
-        sendStartupDraftPaste()
-      }
-    } catch {
-      // Best-effort fallback; the primary path is the PTY readiness marker.
-    }
-  }
-  const armStartupDraftHardTimer = (): void => {
-    if (!startupDraftReadyScanner || startupDraftPasteSettled || startupDraftHardTimer !== null) {
-      return
-    }
-    startupDraftHardTimer = setTimeout(() => {
-      startupDraftHardTimer = null
-      if (!getStartupDraftPtyId()) {
-        return
-      }
-      if (session.startupDraftAgent === 'codex') {
-        startupDraftPasteSettled = true
-        // A timed-out launch stays consumed across pane disposal and remount.
-        session.startupDraftPasteAttempted = true
-        session.cleanupStartupDraftPasteTimers()
-        createPasteReadinessTimeoutNotice({
-          worktreeId: session.deps.worktreeId,
-          tabId: session.deps.tabId,
-          agent: 'codex',
-          submitted: false
-        }).onTimeout()
-        return
-      }
-      void deliverStartupDraftIfAgentOwnsPty()
-    }, resolveDraftPasteReadyTimeoutMs(session.startupDraftAgent))
-  }
-  const armStartupDraftQuietTimer = (): void => {
-    if (!startupDraftReadyScanner || startupDraftPasteSettled) {
-      return
-    }
-    if (startupDraftQuietTimer !== null) {
-      clearTimeout(startupDraftQuietTimer)
-    }
-    startupDraftQuietTimer = setTimeout(() => {
-      startupDraftQuietTimer = null
-      sendStartupDraftPaste()
-    }, STARTUP_DRAFT_PASTE_QUIET_MS)
   }
   session.armStartupDraftReadinessObservation = (): void => {
-    if (!startupDraftReadyScanner || startupDraftReadinessArmed) {
-      return
-    }
-    startupDraftReadinessArmed = true
-    armStartupDraftHardTimer()
+    armed = true
+    begin()
   }
-  session.observeStartupDraftPasteReadiness = (data: string): void => {
-    if (!startupDraftReadyScanner || !startupDraftReadinessArmed || startupDraftPasteSettled) {
-      return
-    }
-    const scanned = startupDraftReadyScanner.observe(data)
-    if (scanned.ready) {
-      sendStartupDraftPaste()
-      return
-    }
-    if (scanned.armQuietTimer) {
-      armStartupDraftQuietTimer()
-    }
-  }
+  session.observeStartupDraftPasteReadiness = (): void => begin()
   if (
     session.ownsStartupDraftPaste &&
     !session.unservedSshTargetId &&
