@@ -552,6 +552,8 @@
     }
   },
   "common": {
+    "details": "Ayrıntılar",
+    "hideDetails": "Ayrıntıları gizle",
     "back": "Geri",
     "cancel": "İptal",
     "close": "Kapat",

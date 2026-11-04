@@ -552,6 +552,8 @@
     }
   },
   "common": {
+    "details": "Details",
+    "hideDetails": "Details ausblenden",
     "back": "Zurück",
     "cancel": "Abbrechen",
     "close": "Schließen",
