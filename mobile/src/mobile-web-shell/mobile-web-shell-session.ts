@@ -20,10 +20,20 @@ import {
   ROUTE_UNAVAILABLE
 } from './mobile-web-shell-gates'
 import { pageRouteRefusalVerdict, routeViewOf, sameRouteView } from './page-route-policy'
-import { CLEAR_PAGE_DOCUMENT_STATE, pageDocumentStatePatch } from './page-document-state'
-import { openByOwnRoutes, openCached, rendersRoute } from './mobile-web-shell-cached-generation'
-import { step } from './mobile-web-shell-session-step'
-import { AWAIT_DOCUMENT_LOAD, reducePageDocumentLifecycle } from './page-document-lifecycle'
+import { pageDocumentStatePatch } from './page-document-state'
+import {
+  generationActivated,
+  openByOwnRoutes,
+  reachableCacheRead,
+  reconcileManifestCache,
+  rendersRoute
+} from './mobile-web-shell-cached-generation'
+import {
+  acceptsSessionEventFlow,
+  step,
+  stepNewFlow
+} from './mobile-web-shell-session-step'
+import { reducePageDocumentLifecycle } from './page-document-lifecycle'
 
 export function createMobileWebShellSession(
   routePathname: string,
@@ -50,6 +60,7 @@ export function createMobileWebShellSession(
     cached: null,
     updateNotice: null,
     requestedBuildId: null,
+    offeredRoutes: null,
     flow: 0
   }
 }
@@ -65,18 +76,20 @@ function startFlow(
   const base = {
     updateNotice: null,
     requestedBuildId: null,
+    offeredRoutes: null,
     ...patch,
     gates,
     flow: session.flow + 1
   }
   const gated = gateState(gateVerdict(gates), patch.retriedOnce ?? session.retriedOnce)
   if (gated !== null) {
-    return step(session, { ...base, state: gated }, before)
+    return stepNewFlow(session, { ...base, state: gated }, before)
   }
   // Offline still sweeps/reads cache; onCacheRead skips only the host compatibility check.
-  return step(session, { ...base, state: CHECKING }, [...before, { kind: 'open-cache' }])
+  return stepNewFlow(session, { ...base, state: CHECKING }, [...before, { kind: 'open-cache' }])
 }
 
+// Unreachable opens the disk generation alone; connected opens a compatible one and still asks the host.
 function onCacheRead(
   session: MobileWebShellSession,
   generation: CachedGeneration | null
@@ -98,7 +111,7 @@ function onCacheRead(
       patch: { cached: generation }
     })
   }
-  return step(session, { cached: generation, state: CHECKING }, [{ kind: 'read-manifest' }])
+  return reachableCacheRead(session, generation, gates)
 }
 
 function onManifestRead(
@@ -131,26 +144,8 @@ function onManifestRead(
       refusal === null ? ROUTE_UNAVAILABLE : ({ kind: 'wall', verdict: refusal } as const)
     return step(session, { ...view, state })
   }
-  // Build ids digest assets, so matching ids can open cached bytes unchanged.
-  const cached = session.cached
-  if (cached?.buildId === manifest.buildId) {
-    return openCached(session, cached, view)
-  }
-  return step(
-    session,
-    {
-      ...view,
-      requestedBuildId: manifest.buildId,
-      state: {
-        kind: 'fetching',
-        completedAssets: 0,
-        totalAssets: manifest.totalAssets,
-        receivedBytes: 0,
-        totalBytes: manifest.totalBytes
-      }
-    },
-    [{ kind: 'download' }]
-  )
+  // Build ids digest assets, so matching ids open cached bytes; a newer build fetches behind a live page.
+  return reconcileManifestCache(session, manifest, view)
 }
 
 // Retry suspect disk bytes once via delete/refetch; renderer loss gets one remount without deletion; unavailable isolation is terminal.
@@ -162,7 +157,7 @@ function onShellFailed(session: MobileWebShellSession, reason: ShellFailure): Mo
   const failed = { kind: 'failed', reason, retriedOnce: session.retriedOnce } as const
   if (reason === 'isolation-unavailable' || reason === 'host-profile-unreadable') {
     // Terminal failures advance flow so pending startup work is cancelled and its completions rejected.
-    return step(session, { state: failed, flow: session.flow + 1 })
+    return stepNewFlow(session, { state: failed, flow: session.flow + 1 })
   }
   if (reason === 'render-process-gone') {
     return session.remountedOnce
@@ -199,7 +194,7 @@ export function reduceMobileWebShellSession(
   session: MobileWebShellSession,
   event: MobileWebShellSessionEvent
 ): MobileWebShellStep {
-  if ('flow' in event && event.flow !== session.flow) {
+  if (!acceptsSessionEventFlow(session, event)) {
     return step(session, {})
   }
   switch (event.type) {
@@ -229,24 +224,8 @@ export function reduceMobileWebShellSession(
         ? step(session, { state: { kind: 'activating', source: 'download' } })
         : step(session, {})
     case 'activated':
-      // Count only download activation as an update: fetch rereads the manifest, so the committed build may differ from the offered id.
-      return step(
-        session,
-        {
-          ...CLEAR_PAGE_DOCUMENT_STATE,
-          state: {
-            kind: 'ready',
-            generationDirectory: event.generationDirectory,
-            sessionId: event.sessionId,
-            buildId: event.buildId,
-            totalBytes: event.totalBytes,
-            elapsedMs: event.elapsedMs
-          }
-        },
-        session.state.kind === 'activating' && session.state.source === 'download'
-          ? [{ kind: 'forget-update-failures' }, AWAIT_DOCUMENT_LOAD]
-          : [AWAIT_DOCUMENT_LOAD]
-      )
+      // Only download activation counts as an update: fetch rereads the manifest, so the committed build may differ from the offered id.
+      return generationActivated(session, event)
     case 'download-failed':
       return onDownloadFailed(session, event.cause)
     case 'shell-failed':
@@ -268,7 +247,7 @@ export function reduceMobileWebShellSession(
     case 'retry-pressed':
       // Only explicit retry resets recovery latches; reconnect must not grant another remount.
       return session.gates === null
-        ? step(session, {
+        ? stepNewFlow(session, {
             retriedOnce: false,
             remountedOnce: false,
             updateNotice: null,
