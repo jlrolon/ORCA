@@ -5,32 +5,14 @@ import { LIST_LEADING_INSET, LIST_ROW_PADDING } from '../components/list/ListGro
 export const troubleshootScreenStyles = themedStyleSheet(() => ({
   container: {
     flex: 1,
-    backgroundColor: colors.bgBase,
-    padding: spacing.lg
-  },
-  topRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.lg
-  },
-  backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: radii.control,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: spacing.sm
-  },
-  heading: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.textPrimary
+    backgroundColor: colors.bgBase
   },
   scroll: {
     flex: 1
   },
   scrollContent: {
-    paddingBottom: spacing.xl
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg
   },
   diagnosticButton: {
     flexDirection: 'row',
