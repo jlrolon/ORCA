@@ -39,6 +39,7 @@ vi.mock('electron', () => ({
 vi.mock('node:fs/promises', () => ({
   constants: { COPYFILE_EXCL: 1 },
   copyFile: vi.fn(),
+  realpath: async (path: string) => path,
   stat: statMock
 }))
 
@@ -124,7 +125,7 @@ describe('registerShellHandlers', () => {
       spawnArgs: args
     }))
     spawnMock.mockReturnValue(createSpawnedProcess())
-    statMock.mockResolvedValue({ isDirectory: () => true })
+    statMock.mockResolvedValue({ isDirectory: () => true, isFile: () => false, mode: 0o40755 })
   })
 
   function getHandler(channel: string): (event: unknown, ...args: unknown[]) => Promise<unknown> {
@@ -384,6 +385,19 @@ describe('registerShellHandlers', () => {
 
       await expect(handler({}, 'file://server/share/file.md', 'local')).resolves.toBeUndefined()
       expect(openPathMock).not.toHaveBeenCalled()
+    })
+
+    it('reveals launchable files instead of opening them', async () => {
+      const handler = getHandler('shell:openFileUri')
+      const app = resolve('Tools.app')
+      const doc = resolve('notes.md')
+
+      await handler({}, pathToFileURL(app).toString(), 'local')
+      await handler({}, pathToFileURL(doc).toString(), 'local')
+
+      expect(showItemInFolderMock).toHaveBeenCalledWith(normalize(app))
+      expect(openPathMock).toHaveBeenCalledTimes(1)
+      expect(openPathMock).toHaveBeenCalledWith(normalize(doc))
     })
   })
 

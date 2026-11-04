@@ -31,6 +31,7 @@ import {
   resolveOwnedPathTarget,
   validateLocalPathTarget
 } from './shell-owned-path-target'
+import { isLaunchablePath } from './launchable-file-type'
 import { registerShellPathExistenceHandlers } from './shell-path-existence-handlers'
 
 export { EXTERNAL_EDITOR_CLI_COMMAND }
@@ -111,6 +112,11 @@ async function openWithSystemDefault(pathValue: string, ownerHostId: unknown): P
     return false
   }
   try {
+    // Links must not run programs; reveal them so the user decides.
+    if (await isLaunchablePath(target.path)) {
+      shell.showItemInFolder(target.path)
+      return true
+    }
     const errorMessage = await shell.openPath(target.path)
     return errorMessage.length === 0
   } catch {
