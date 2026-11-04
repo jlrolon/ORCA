@@ -4,11 +4,19 @@ import type {
 } from '../../../shared/orcad-migration/orcad-migration-manifest'
 import type { PersistedState } from '../../../shared/persisted-state-types'
 import type { SparsePreset } from '../../../shared/worktree/create-types'
-import type { WorkspaceLineage, WorktreeLineage } from '../../../shared/worktree/lineage-types'
+import type {
+  CrossStoreWorkspaceLineage,
+  WorkspaceLineage,
+  WorktreeLineage
+} from '../../../shared/worktree/lineage-types'
 import type { WorktreeMeta } from '../../../shared/worktree/meta-types'
 import { omitDefaultWorktreeMetaFields } from '../../../shared/worktree/meta-persisted-defaults'
 import { assertOrcadDestinationCanonicalMetadata } from './orcad-destination-worktree-metadata'
 import { assertSameValue } from './orcad-catalog-row-identity'
+import {
+  findCrossStoreLineageConflict,
+  validCrossStoreLineage
+} from '../../../shared/worktree/cross-store-lineage-records'
 import {
   mergeRetiredNameRegistries,
   type RetiredNameRegistry
@@ -38,6 +46,7 @@ export type PreparedOrcadMigrationDormantState = {
   newWorktreeMeta: KeyedRow<WorktreeMeta>[]
   newWorktreeLineage: KeyedRow<WorktreeLineage>[]
   newWorkspaceLineage: KeyedRow<WorkspaceLineage>[]
+  newCrossStoreLineage: KeyedRow<CrossStoreWorkspaceLineage>[]
   newSparsePresets: SparsePreset[]
   retiredNameUpdates: RegistryUpdate[]
   retirementNamespaceUpdates: RegistryUpdate[]
@@ -67,6 +76,11 @@ export function prepareOrcadMigrationDormantState(
     key: entry.childWorkspaceKey,
     value: structuredClone(entry.lineage)
   }))
+  const crossStoreLineage = (payload.crossStoreLineage ?? []).map((entry) => ({
+    key: entry.childWorkspaceKey,
+    value: structuredClone(entry.lineage)
+  }))
+  assertNoLineageChildConflict(payload, state)
   const existingPresets = new Map(
     Object.values(state.sparsePresetsByRepo)
       .flat()
@@ -97,6 +111,12 @@ export function prepareOrcadMigrationDormantState(
       workspaceLineage,
       state.workspaceLineageByChildKey,
       'workspace_lineage'
+    ),
+    newCrossStoreLineage: selectNewKeyedRows(
+      crossStoreLineage,
+      // An unreadable saved entry is replaced by the readable one the move carries.
+      validCrossStoreLineage(state.crossStoreLineageByChildKey),
+      'cross_store_lineage'
     ),
     newSparsePresets,
     retiredNameUpdates: payload.retiredWorktreeNames.map((entry) => ({
@@ -139,6 +159,12 @@ export function applyPreparedOrcadMigrationDormantState(
   for (const entry of prepared.newWorkspaceLineage) {
     state.workspaceLineageByChildKey[entry.key] = entry.value
   }
+  if (prepared.newCrossStoreLineage.length > 0) {
+    state.crossStoreLineageByChildKey ??= {}
+    for (const entry of prepared.newCrossStoreLineage) {
+      state.crossStoreLineageByChildKey[entry.value.childWorkspaceKey] = entry.value
+    }
+  }
   for (const preset of prepared.newSparsePresets) {
     state.sparsePresetsByRepo[preset.repoId] = [
       ...(state.sparsePresetsByRepo[preset.repoId] ?? []),
@@ -166,6 +192,30 @@ export function applyPreparedOrcadMigrationDormantState(
   applyPreparedOrcadMigrationClientState(prepared.clientState, state)
 }
 
+/** Rejects before any mutation: a child must not end up with both parent representations. */
+function assertNoLineageChildConflict(
+  payload: OrcadMigrationDormantStatePayload,
+  state: PersistedState
+): void {
+  const incomingCrossStore = (payload.crossStoreLineage ?? []).map(
+    (entry) => entry.childWorkspaceKey
+  )
+  const conflict =
+    findCrossStoreLineageConflict({
+      crossStoreChildKeys: incomingCrossStore,
+      sameStoreWorktreeIds: Object.keys(state.worktreeLineageById),
+      sameStoreChildKeys: Object.keys(state.workspaceLineageByChildKey)
+    }) ??
+    findCrossStoreLineageConflict({
+      crossStoreChildKeys: Object.keys(validCrossStoreLineage(state.crossStoreLineageByChildKey)),
+      sameStoreWorktreeIds: payload.worktreeLineage.map((entry) => entry.worktreeId),
+      sameStoreChildKeys: payload.workspaceLineage.map((entry) => entry.childWorkspaceKey)
+    })
+  if (conflict) {
+    throw new Error(`orcad_migration_dormant_lineage_child_conflict:${conflict}`)
+  }
+}
+
 function selectNewKeyedRows<T>(
   incoming: KeyedRow<T>[],
   existing: Record<string, T>,
@@ -191,6 +241,7 @@ function emptyPreparedDormantState(): PreparedOrcadMigrationDormantState {
     newWorktreeMeta: [],
     newWorktreeLineage: [],
     newWorkspaceLineage: [],
+    newCrossStoreLineage: [],
     newSparsePresets: [],
     retiredNameUpdates: [],
     retirementNamespaceUpdates: [],
