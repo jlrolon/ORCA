@@ -7,8 +7,10 @@ import {
   useMobileNativeChatDisclosures
 } from './transcript/mobile-native-chat-disclosure-store'
 import { type NativeScrollEvent, type NativeSyntheticEvent, Text, View } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler'
+import { useChatBottomFit } from './composer/use-chat-bottom-fit'
+import type { AskAnswerSelection } from '../../../../src/shared/native-chat/input/native-chat-ask-answer'
+import type { AskPrompt } from '../../../../src/shared/native-chat/input/native-chat-ask-types'
 import type { NativeChatMessage } from '../../../../src/shared/native-chat/native-chat-types'
 import type {
   NativeChatLiveTurnIndicator,
@@ -38,7 +40,7 @@ import {
 import { MobileNativeChatLiveLine } from './transcript/MobileNativeChatLiveLine'
 import { MobileNativeChatAwaitingInputRow } from './transcript/MobileNativeChatAwaitingInputRow'
 import type { NativeChatAwaitingInput } from '../../../../src/shared/native-chat/native-chat-terminal-turn'
-import { MobileNativeChatFloatingControls } from './MobileNativeChatFloatingControls'
+import { DuoRailComposerTop, MobileNativeChatJumpControls } from '../duo-rail-jump-controls'
 import type { PendingNativeChatImage } from './composer/mobile-native-chat-image-attachment'
 import {
   MobileNativeChatDraftComposer,
@@ -198,8 +200,7 @@ export function MobileNativeChatView({
 }: Props): React.JSX.Element {
   useMobileColorScheme()
   const t = useMobileTranslation()
-  const insets = useSafeAreaInsets()
-  const bottomPad = keyboardInset > 0 ? keyboardInset + insets.bottom : insets.bottom
+  const { bottomPad, composerFit, transcriptInset } = useChatBottomFit(keyboardInset)
   const { fontScale, pinchGesture } = useMobileNativeChatPinchGesture()
 
   const { data } = useMemo(
@@ -322,7 +323,7 @@ export function MobileNativeChatView({
           title={t('session.nativeChatView.loading', 'Loading conversation…')}
         />
       ) : (
-        <GestureHandlerRootView style={styles.listWrap}>
+        <GestureHandlerRootView style={[styles.listWrap, transcriptInset]}>
           <MobileNativeChatDisclosureContext.Provider value={disclosures}>
             <MobileNativeChatScrollRootsBoundary
               {...{ rowKeys, layoutKey }}
@@ -341,7 +342,7 @@ export function MobileNativeChatView({
               </GestureDetector>
             </MobileNativeChatScrollRootsBoundary>
           </MobileNativeChatDisclosureContext.Provider>
-          <MobileNativeChatFloatingControls
+          <MobileNativeChatJumpControls
             showJumpToTail={tail.showJumpToTail}
             onJumpToTail={jumpToTail}
           />
@@ -374,8 +375,9 @@ export function MobileNativeChatView({
         </View>
       ) : null}
       {trayContent}
-      <View style={promptOwnsInput ? styles.hidden : undefined}>
+      <DuoRailComposerTop keyboardInset={keyboardInset} hidden={promptOwnsInput}>
         <MobileNativeChatDraftComposer
+          {...composerFit}
           draftScopeKey={composerScopeKey}
           structured={structuredActivityUi && structured ? { ...structured, onOpenFile } : null}
           draftKey={draftKey}
@@ -405,7 +407,7 @@ export function MobileNativeChatView({
           onNeedSkills={onNeedSkills}
           stop={canStop ? { onStop, held: turnIndicator?.stopRequestInFlight === true } : null}
         />
-      </View>
+      </DuoRailComposerTop>
     </View>
   )
 }
