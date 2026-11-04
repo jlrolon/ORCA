@@ -62,6 +62,7 @@ vi.mock('../transport/client-context.web', () => ({
   })
 }))
 
+import { encodeInPageNotificationTarget } from '../notifications/in-page-notification-navigation'
 import { createFakeRpcClient } from '../mobile-web-shell/bridge-host-test-fakes'
 import type { ConnectionState } from '../transport/types'
 import { useMobileStructuredSessionOpening } from './use-mobile-structured-session-opening'
@@ -87,6 +88,15 @@ const TABS: MobileSessionTab[] = [
     leafId: LEAF,
     title: 'second',
     terminal: 'pty-b',
+    isActive: false
+  },
+  {
+    type: 'agent-session',
+    id: 'structured-agent-session-sess-99',
+    sessionId: 'sess-99',
+    title: 'Native Chat',
+    agent: 'claude',
+    status: 'waiting-approval',
     isActive: false
   }
 ]
@@ -206,6 +216,128 @@ describe('the page pane hook', () => {
     expect(switched.map((tab) => tab.id)).toEqual(['second'])
     expect(pageUrl.params.paneKey).toBeUndefined()
   })
+
+  it('does nothing at all when the page was opened on no pane', () => {
+    render(true)
+    expect(switched).toEqual([])
+  })
+
+  it('replaces the route in-page and switches tabs after cross-workspace tabs load', () => {
+    const replaced: string[] = []
+    function CrossProbe({
+      worktreeId,
+      tabs,
+      terminalsLoaded
+    }: {
+      worktreeId: string
+      tabs: MobileSessionTab[]
+      terminalsLoaded: boolean
+    }): null {
+      useNotificationPaneNavigation({
+        hostId: 'host-1',
+        worktreeId,
+        router: {
+          replace: (href) => {
+            replaced.push(typeof href === 'string' ? href : String(href))
+          }
+        },
+        sessionTabs: tabs,
+        terminalsLoaded,
+        switchSessionTab: (tab) => switched.push(tab)
+      })
+      return null
+    }
+
+    let tree!: ReactTestRenderer
+    act(() => {
+      tree = create(
+        createElement(CrossProbe, { worktreeId: 'wt-1', tabs: TABS, terminalsLoaded: true })
+      )
+    })
+    deliver(
+      encodeInPageNotificationTarget({
+        worktreeId: 'wt-2',
+        paneKey: `tab-b:${LEAF}`
+      })
+    )
+    expect(replaced).toEqual([
+      `/h/host-1/session/wt-2?paneKey=${encodeURIComponent(`tab-b:${LEAF}`)}`
+    ])
+    expect(switched).toEqual([])
+
+    // Route switches to wt-2; startup clears sessionTabs before hydrating wt-2's tabs.
+    act(() => {
+      tree.update(
+        createElement(CrossProbe, { worktreeId: 'wt-2', tabs: [], terminalsLoaded: false })
+      )
+    })
+    expect(switched).toEqual([])
+
+    act(() => {
+      tree.update(
+        createElement(CrossProbe, { worktreeId: 'wt-2', tabs: TABS, terminalsLoaded: true })
+      )
+    })
+    expect(switched.map((tab) => tab.id)).toEqual(['second'])
+  })
+
+  it('switches to an agent-session tab even when paneKey carries the desktop structured tab id prefix', () => {
+    render(true)
+    const desktopPaneKey = structuredAgentSessionPaneKey('desktop-structured-tab-1', 'sess-99')
+    deliver(desktopPaneKey)
+    expect(switched.map((tab) => tab.id)).toEqual(['structured-agent-session-sess-99'])
+  })
+})
+
+it('opens a missing canonical native notification once, only after inventory loads', () => {
+  const openNativeSession = vi.fn(async () => {})
+  const paneKey = structuredAgentSessionPaneKey(
+    structuredAgentSessionTabId('historical'),
+    'historical'
+  )
+  bridge.route = { pathname: '/h/host-1/session/wt-1', params: { paneKey } }
+  let tree: ReactTestRenderer | undefined
+  act(() => {
+    tree = create(createElement(Probe, { terminalsLoaded: false, openNativeSession }))
+  })
+  expect(openNativeSession).not.toHaveBeenCalled()
+  act(() => {
+    tree?.update(createElement(Probe, { terminalsLoaded: true, openNativeSession }))
+  })
+  expect(openNativeSession).toHaveBeenCalledExactlyOnceWith({
+    kind: 'notification',
+    sessionId: 'historical',
+    worktreeId: 'wt-1'
+  })
+  deliver(paneKey)
+  expect(openNativeSession).toHaveBeenCalledOnce()
+  act(() => tree?.unmount())
+})
+it('routes an existing native notification through lineage instead of selecting its historical tab directly', () => {
+  const openNativeSession = vi.fn(async () => {})
+  const tab: MobileSessionTab = {
+    type: 'agent-session',
+    id: 'issued',
+    sessionId: 'historical',
+    agent: 'codex',
+    title: 'Chat',
+    isActive: false
+  }
+  let tree: ReactTestRenderer | undefined
+  act(() => {
+    tree = create(
+      createElement(Probe, { terminalsLoaded: true, sessionTabs: [tab], openNativeSession })
+    )
+  })
+  deliver(structuredAgentSessionPaneKey('issued', 'historical'))
+  expect(openNativeSession).toHaveBeenCalledExactlyOnceWith({
+    kind: 'notification',
+    sessionId: 'historical',
+    worktreeId: 'wt-1',
+    agent: 'codex'
+  })
+  expect(switched).toEqual([])
+  act(() => tree?.unmount())
 })
 
 it.each([false, true])(

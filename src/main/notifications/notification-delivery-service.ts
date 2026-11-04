@@ -117,7 +117,8 @@ export function createNotificationDeliveryService(
       if (
         !request.mobileDeliveredByHost &&
         deps.dispatchMobileNotification &&
-        request.source !== 'test'
+        request.source !== 'test' &&
+        request.source !== 'terminal-bell'
       ) {
         if (
           reserveNotificationCooldown(
@@ -138,6 +139,7 @@ export function createNotificationDeliveryService(
             ...(!desktopAllowed ? { desktopAllowed: false } : {}),
             title: notificationOptions.title,
             body: notificationOptions.body,
+            ...(request.agentPrompt ? { agentPrompt: request.agentPrompt } : {}),
             worktreeId: request.worktreeId,
             ...(request.workspaceExecutionHostId !== undefined
               ? { workspaceExecutionHostId: request.workspaceExecutionHostId }

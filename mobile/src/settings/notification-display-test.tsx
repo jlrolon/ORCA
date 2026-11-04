@@ -3,6 +3,8 @@ import { ListRow } from '../components/list/ListGroup'
 import { useAllHostClients } from '../transport/use-all-host-clients'
 import { loadHostCatalog } from '../transport/host-store'
 import { pushDeliveryTest } from '../notifications/mobile-push-delivery-test-operations'
+import { sendLocalNotificationDisplayTest } from '../notifications/push-socket-fallback'
+import { getDevicePushToken } from '../notifications/push-token'
 import { useMobileColorScheme } from '../theme/use-mobile-color-scheme'
 import { useMobileTranslation } from '../i18n/use-mobile-translation'
 import { SettingsNote, SettingsSection } from './settings-screen-frame'
@@ -19,6 +21,26 @@ import {
   DESKTOP_NOTIFICATION_CHANNEL_ID,
   ensureDesktopNotificationChannel
 } from '../notifications/desktop-notification-channel'
+
+const TOKEN_PROBE_TIMEOUT_MS = 1500
+
+async function readPushTokenQuickly(): Promise<
+  Awaited<ReturnType<typeof getDevicePushToken>> | 'timeout'
+> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      getDevicePushToken().catch(() => null),
+      new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => resolve('timeout'), TOKEN_PROBE_TIMEOUT_MS)
+      })
+    ])
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer)
+    }
+  }
+}
 
 export function NotificationDisplayTest({ onTroubleshoot }: { onTroubleshoot: () => void }) {
   useMobileColorScheme()
@@ -122,6 +144,7 @@ export function NotificationDisplayTest({ onTroubleshoot }: { onTroubleshoot: ()
         'settings.notificationDisplayTest.unsupportedHost',
         'This desktop does not support push notifications. Update it to receive push.'
       )
+      let sawNotRegistered = false
       const fallback = connected.every(({ hostId }) => getHostPushSupported(hostId) === false)
         ? 'unsupported-host'
         : await waitForPushFallback(
@@ -176,6 +199,7 @@ export function NotificationDisplayTest({ onTroubleshoot }: { onTroubleshoot: ()
           return
         }
         if (result?.reason === 'not_registered') {
+          sawNotRegistered = true
           unavailable = t(
             'settings.notificationDisplayTest.registrationPending',
             'Push registration is not ready on this desktop. Try again shortly.'
@@ -193,6 +217,17 @@ export function NotificationDisplayTest({ onTroubleshoot }: { onTroubleshoot: ()
                 'Could not send through Orca’s push service. Try again.'
               )
         )
+      }
+      if (
+        sawNotRegistered &&
+        (await loadPushNotificationsEnabled()) &&
+        (await readPushTokenQuickly()) === null
+      ) {
+        await sendLocalNotificationDisplayTest()
+        setMessage(
+          'Sent a local test notification. Live connection alerts are active on this device.'
+        )
+        return
       }
       await localTest(unavailable)
     } catch (error) {

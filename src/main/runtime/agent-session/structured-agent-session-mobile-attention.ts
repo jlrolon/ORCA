@@ -133,6 +133,7 @@ export function createStructuredAttentionMobileDelivery(
         ...(!desktopAllowed ? { desktopAllowed: false } : {}),
         title,
         body,
+        ...(summary?.latestPrompt ? { agentPrompt: summary.latestPrompt } : {}),
         worktreeId: scope.workspaceId,
         paneKey,
         notificationId: attentionKey,

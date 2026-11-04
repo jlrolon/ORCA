@@ -140,6 +140,7 @@ describe('TerminalAgentPhonePush', () => {
         source: 'agent-task-complete',
         title: 'orca / feature - Claude finished',
         body: 'Fixed it.',
+        agentPrompt: 'fix the bug',
         worktreeId: WT,
         paneKey: PANE,
         notificationId: ID,

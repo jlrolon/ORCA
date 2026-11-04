@@ -22,6 +22,10 @@ import { pageStorageForReader } from './page-storage-keys'
 import { BRIDGE_TERMINAL_KEY_FRAME } from './bridge/bridge-terminal-key'
 import { readBridgeConnectionSnapshot } from './bridge/bridge-connection-snapshot'
 import type { BridgeHost, BridgeHostOptions } from './bridge-host-contract'
+import {
+  noteBridgeHostClientMessage,
+  noteBridgeHostServerPayload
+} from '../notifications/in-page-notification-navigation'
 
 export type { BridgeHost, BridgeHostDiagnostic, BridgeHostOptions } from './bridge-host-contract'
 
@@ -84,6 +88,9 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
     onTerminalBacklog: (report) => {
       options.onDiagnostic?.({ kind: 'terminal-backlog', ...report })
     },
+    onPayload: (id, payload) => {
+      noteBridgeHostServerPayload(host.id, id, payload)
+    },
     terminalTimers: options.terminalTimers
   })
 
@@ -142,6 +149,9 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
   }
 
   function sendReply(id: string, payload: RpcResponse): void {
+    if (payload.ok) {
+      noteBridgeHostServerPayload(host.id, id, payload.result)
+    }
     const split = splitBridgeReply(id, payload)
     if (!split.ok) {
       sendError(id, new BridgeReplyUndeliverableError(split.refusal))
@@ -242,6 +252,7 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
       sendError(message.id, new BridgeCapExceededError('before-ready'))
       return
     }
+    noteBridgeHostClientMessage(host.id, message, () => client.getState() === 'connected')
     switch (message.type) {
       case 'request':
         requests.open(message)

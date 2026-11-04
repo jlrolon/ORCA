@@ -121,6 +121,28 @@ describe('createNotificationDeliveryService', () => {
     expect(harness.order).toEqual(['tray', 'mobile'])
   })
 
+  it('forwards paneKey to mobile notification dispatch when present on the request', () => {
+    const harness = makeHarness(makeSettings())
+    createNotificationDeliveryService(harness.deps).dispatch(
+      makeRequest({ source: 'agent-task-complete', paneKey: 'tab-1:leaf-1' })
+    )
+    expect(harness.dispatchMobileNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'agent-task-complete',
+        worktreeId: 'wt-1',
+        paneKey: 'tab-1:leaf-1'
+      })
+    )
+  })
+
+  it('does not fan out terminal-bell notifications to mobile', () => {
+    const harness = makeHarness(makeSettings())
+    createNotificationDeliveryService(harness.deps).dispatch(
+      makeRequest({ source: 'terminal-bell', paneKey: 'tab-1:leaf-1' })
+    )
+    expect(harness.dispatchMobileNotification).not.toHaveBeenCalled()
+  })
+
   it('gates agent questions on needs-input and finished turns on task-complete', () => {
     const harness = makeHarness(makeSettings({ agentTaskComplete: false }))
     const service = createNotificationDeliveryService(harness.deps)

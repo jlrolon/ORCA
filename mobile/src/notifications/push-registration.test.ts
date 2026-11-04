@@ -19,6 +19,7 @@ import { getDevicePushToken, type MobilePushToken } from './push-token'
 import {
   NOTIFICATIONS_REMOTE_PUSH_CAPABILITY,
   attachPushRegistration,
+  isHostPushRegistered,
   resetPushRegistrationForTests,
   setRemotePushEnabled
 } from './push-registration'
@@ -139,4 +140,74 @@ describe('push unregistration', () => {
     expect(sent).toContain('notifications.unregisterPush')
     expect(stored).toEqual({ registeredHostIds: [], pendingUnregisterHostIds: [] })
   })
+})
+function makeClient(capabilities: readonly string[]): {
+  client: {
+    sendRequest: (method: string, params?: unknown, options?: unknown) => Promise<RpcResponse>
+  }
+  sent: Array<{ method: string }>
+} {
+  const sent: Array<{ method: string }> = []
+  const client = {
+    sendRequest: vi.fn(async (method: string) => {
+      sent.push({ method })
+      if (method === 'status.get') {
+        return ok({ capabilities: [...capabilities] })
+      }
+      if (method === 'notifications.registerPush') {
+        return ok({ registered: true, registrationId: 'registration-1' })
+      }
+      if (method === 'notifications.unregisterPush') {
+        return ok({ unregistered: true })
+      }
+      return ok(null)
+    })
+  }
+  return { client, sent }
+}
+
+function methodsIn(sent: Array<{ method: string }>): string[] {
+  return sent.map((request) => request.method)
+}
+
+describe('isHostPushRegistered', () => {
+  it('is true after the connected host registers push', async () => {
+    const { client } = makeClient([NOTIFICATIONS_REMOTE_PUSH_CAPABILITY])
+    await setRemotePushEnabled(true)
+    attachPushRegistration('host-1', client)
+    await flush()
+    await expect(isHostPushRegistered('host-1')).resolves.toBe(true)
+  })
+
+  it('is false when the device has no push token', async () => {
+    vi.mocked(getDevicePushToken).mockResolvedValue(null)
+    const { client } = makeClient([NOTIFICATIONS_REMOTE_PUSH_CAPABILITY])
+    await setRemotePushEnabled(true)
+    attachPushRegistration('host-1', client)
+    await flush()
+    await expect(isHostPushRegistered('host-1')).resolves.toBe(false)
+  })
+
+  it('is false after remote push is switched off', async () => {
+    const { client } = makeClient([NOTIFICATIONS_REMOTE_PUSH_CAPABILITY])
+    await setRemotePushEnabled(true)
+    attachPushRegistration('host-1', client)
+    await flush()
+    await setRemotePushEnabled(false)
+    await flush()
+    await expect(isHostPushRegistered('host-1')).resolves.toBe(false)
+  })
+})
+
+it('does not register or renew when a connected phone is in the background', async () => {
+  AppState.currentState = 'background'
+  const { client, sent } = makeClient([NOTIFICATIONS_REMOTE_PUSH_CAPABILITY])
+  await setRemotePushEnabled(true)
+  attachPushRegistration('background-phone', client)
+  await flush()
+  expect(methodsIn(sent)).not.toContain('notifications.registerPush')
+  AppState.currentState = 'active'
+  attachPushRegistration('background-phone', client)
+  await flush()
+  expect(methodsIn(sent)).toContain('notifications.registerPush')
 })
