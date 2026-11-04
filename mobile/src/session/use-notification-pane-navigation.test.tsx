@@ -28,22 +28,15 @@ const bridge = vi.hoisted(() => {
   return held
 })
 
-// The page's own router: an in-page hop puts the tapped pane in its URL, not in the shell route.
-const pageUrl = vi.hoisted(() => {
-  const url: {
-    params: { paneKey?: string }
-    setParams: (next: { paneKey?: string }) => void
-  } = {
-    params: {},
-    setParams: (next) => {
-      url.params = { ...url.params, ...next }
-    }
-  }
-  return url
-})
+const routeParams = vi.hoisted(() => ({ paneKey: '' as string | undefined }))
+const setParams = vi.hoisted(() =>
+  vi.fn((next: { paneKey?: string }) => {
+    routeParams.paneKey = next.paneKey ?? ''
+  })
+)
 vi.mock('expo-router', () => ({
-  useLocalSearchParams: () => pageUrl.params,
-  useRouter: () => pageUrl
+  useLocalSearchParams: () => routeParams,
+  useRouter: () => ({ setParams })
 }))
 
 vi.mock('../transport/client-context.web', () => ({
@@ -135,8 +128,9 @@ beforeEach(() => {
   bridge.route = null
   bridge.listeners = []
   bridge.cleared.length = 0
+  routeParams.paneKey = ''
+  setParams.mockClear()
   switched.length = 0
-  pageUrl.params = {}
 })
 
 // Exercise the page hook: shell init carries pane requests because this document at / cannot edit the native route.
@@ -189,7 +183,7 @@ describe('the page pane hook', () => {
   it('switches to the agent row tapped in the host list when the page opened the session itself', () => {
     // #34235: the shell route stays the host list, so the tapped pane is only in the page URL.
     bridge.route = { pathname: '/h/host-1' }
-    pageUrl.params = { paneKey: `tab-b:${LEAF}` }
+    routeParams.paneKey = `tab-b:${LEAF}`
     const tree = render(true)
     expect(switched.map((tab) => tab.id)).toEqual(['second'])
     act(() => {
@@ -199,12 +193,31 @@ describe('the page pane hook', () => {
     expect(switched.map((tab) => tab.id)).toEqual(['second'])
   })
 
-  it('follows a newer notification the shell holds over the pane the URL copied at bootstrap', () => {
-    bridge.route = { pathname: '/h/host-1/session/wt-1', params: { paneKey: `tab-b:${LEAF}` } }
-    pageUrl.params = { paneKey: `tab-a:${LEAF}` }
+  it('does nothing at all when the page was opened on no pane', () => {
+    render(true)
+    expect(switched).toEqual([])
+  })
+
+  it('switches to the pane named on this document’s route', () => {
+    routeParams.paneKey = `tab-b:${LEAF}`
     render(true)
     expect(switched.map((tab) => tab.id)).toEqual(['second'])
-    expect(pageUrl.params.paneKey).toBeUndefined()
+    expect(setParams).toHaveBeenCalledWith({ paneKey: '' })
+  })
+
+  it('applies the shell pane once when the document route names that same pane', () => {
+    bridge.route = { pathname: '/h/host-1/session/wt-1', params: { paneKey: `tab-b:${LEAF}` } }
+    routeParams.paneKey = `tab-b:${LEAF}`
+    render(true)
+    expect(switched.map((tab) => tab.id)).toEqual(['second'])
+    expect(setParams).toHaveBeenCalledWith({ paneKey: '' })
+  })
+
+  it('applies a document pane that differs from the shell pane', () => {
+    bridge.route = { pathname: '/h/host-1/session/wt-1', params: { paneKey: `tab-a:${LEAF}` } }
+    routeParams.paneKey = `tab-b:${LEAF}`
+    render(true)
+    expect(switched.map((tab) => tab.id)).toEqual(['second'])
   })
 })
 
