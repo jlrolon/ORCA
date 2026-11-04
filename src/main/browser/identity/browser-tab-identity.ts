@@ -44,8 +44,10 @@ export function resolveBrowserTabIdentity(args: {
   return { kind: 'process', userAgent: args.processIdentity.userAgent }
 }
 
-// A UA-only CDP override blanks every client hint, which brands the tab as a spoofed
-// browser on sign-in and anti-bot checks; ship Chromium-shaped metadata with the override.
+/**
+ * A UA-only CDP override blanks every client hint, which brands the tab as a spoofed
+ * browser on sign-in and anti-bot checks; ship Chromium-shaped metadata with the override.
+ */
 export function desktopUserAgentMetadata(userAgent: string): UserAgentMetadata {
   const chromeFull =
     userAgent.match(/Chrome\/([\d.]+)/)?.[1] ?? `${extractChromeMajor(userAgent)}.0.0.0`
@@ -71,7 +73,7 @@ export function desktopUserAgentMetadata(userAgent: string): UserAgentMetadata {
 
 // Chromium reports Windows via the Universal API Contract version, not the OS version:
 // Windows 11 builds must map to 13.0.0+ or sites classify the session as Windows 10.
-const WINDOWS_PLATFORM_VERSION_BY_MIN_BUILD: ReadonlyArray<readonly [number, string]> = [
+const WINDOWS_PLATFORM_VERSION_BY_MIN_BUILD: readonly (readonly [number, string])[] = [
   [26100, '19.0.0'],
   [22621, '15.0.0'],
   [22000, '13.0.0'],
@@ -86,6 +88,7 @@ const WINDOWS_PLATFORM_VERSION_BY_MIN_BUILD: ReadonlyArray<readonly [number, str
   [10240, '1.0.0']
 ]
 
+/** Maps a Windows build number to the Universal API Contract version Chromium reports. */
 export function windowsClientHintPlatformVersion(systemVersion: string): string {
   const build = Number(systemVersion.split('.')[2])
   if (Number.isFinite(build)) {
@@ -98,12 +101,13 @@ export function windowsClientHintPlatformVersion(systemVersion: string): string 
   return '10.0.0'
 }
 
-// Chromium emits numeric major.minor.bugfix; drop any non-numeric tail.
+/** Chromium emits numeric major.minor.bugfix; drop any non-numeric tail. */
 export function numericClientHintPlatformVersion(systemVersion: string): string {
   const match = systemVersion.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?/)
   return match ? `${match[1]}.${match[2] ?? '0'}.${match[3] ?? '0'}` : ''
 }
 
+/** The platform version Chromium itself would report for this OS, empty where it withholds one. */
 function desktopPlatformVersion(): string {
   const systemVersion = process.getSystemVersion?.() ?? ''
   if (process.platform === 'win32') {
@@ -117,7 +121,7 @@ function desktopPlatformVersion(): string {
   return ''
 }
 
-// Chromium reports the hardware architecture: an x64 build translated on ARM still presents arm.
+/** Chromium reports the hardware architecture: an x64 build translated on ARM still presents arm. */
 function desktopArchitecture(): string {
   if (process.arch.startsWith('arm') || app?.runningUnderARM64Translation) {
     return 'arm'
