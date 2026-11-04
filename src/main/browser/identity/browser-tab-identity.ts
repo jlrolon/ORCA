@@ -1,5 +1,6 @@
 // Share identity between WebContents, CDP and request hooks so user agents and client hints agree.
 
+import { app } from 'electron'
 import type { BrowserProcessUserAgentIdentity } from './browser-process-user-agent'
 import { googleAuthUserAgent, isGoogleAuthUrl } from './browser-google-auth-ua'
 
@@ -41,6 +42,91 @@ export function resolveBrowserTabIdentity(args: {
     return buildMobileTabIdentity(args.processIdentity.userAgent)
   }
   return { kind: 'process', userAgent: args.processIdentity.userAgent }
+}
+
+/**
+ * A UA-only CDP override blanks every client hint, which brands the tab as a spoofed
+ * browser on sign-in and anti-bot checks; ship Chromium-shaped metadata with the override.
+ */
+export function desktopUserAgentMetadata(userAgent: string): UserAgentMetadata {
+  const chromeFull =
+    userAgent.match(/Chrome\/([\d.]+)/)?.[1] ?? `${extractChromeMajor(userAgent)}.0.0.0`
+  const chromeMajor = chromeFull.split('.')[0] ?? extractChromeMajor(userAgent)
+  return {
+    brands: [
+      { brand: 'Not;A=Brand', version: '8' },
+      { brand: 'Chromium', version: chromeMajor }
+    ],
+    fullVersionList: [
+      { brand: 'Not;A=Brand', version: '8.0.0.0' },
+      { brand: 'Chromium', version: chromeFull }
+    ],
+    fullVersion: chromeFull,
+    platform:
+      process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux',
+    platformVersion: desktopPlatformVersion(),
+    architecture: desktopArchitecture(),
+    model: '',
+    mobile: false
+  }
+}
+
+// Chromium reports Windows via the Universal API Contract version, not the OS version:
+// Windows 11 builds must map to 13.0.0+ or sites classify the session as Windows 10.
+const WINDOWS_PLATFORM_VERSION_BY_MIN_BUILD: readonly (readonly [number, string])[] = [
+  [26100, '19.0.0'],
+  [22621, '15.0.0'],
+  [22000, '13.0.0'],
+  [19041, '10.0.0'],
+  [18362, '8.0.0'],
+  [17763, '7.0.0'],
+  [17134, '6.0.0'],
+  [16299, '5.0.0'],
+  [15063, '4.0.0'],
+  [14393, '3.0.0'],
+  [10586, '2.0.0'],
+  [10240, '1.0.0']
+]
+
+/** Maps a Windows build number to the Universal API Contract version Chromium reports. */
+export function windowsClientHintPlatformVersion(systemVersion: string): string {
+  const build = Number(systemVersion.split('.')[2])
+  if (Number.isFinite(build)) {
+    for (const [minBuild, contractVersion] of WINDOWS_PLATFORM_VERSION_BY_MIN_BUILD) {
+      if (build >= minBuild) {
+        return contractVersion
+      }
+    }
+  }
+  return '10.0.0'
+}
+
+/** Chromium emits numeric major.minor.bugfix; drop any non-numeric tail. */
+export function numericClientHintPlatformVersion(systemVersion: string): string {
+  const match = systemVersion.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?/)
+  return match ? `${match[1]}.${match[2] ?? '0'}.${match[3] ?? '0'}` : ''
+}
+
+/** The platform version Chromium itself would report for this OS, empty where it withholds one. */
+function desktopPlatformVersion(): string {
+  const systemVersion = process.getSystemVersion?.() ?? ''
+  if (process.platform === 'win32') {
+    return windowsClientHintPlatformVersion(systemVersion)
+  }
+  if (process.platform === 'darwin') {
+    return numericClientHintPlatformVersion(systemVersion)
+  }
+  // Chromium sends an empty platform version on Linux; a kernel version would both
+  // mismatch that fingerprint and expose entropy Chromium withholds.
+  return ''
+}
+
+/** Chromium reports the hardware architecture: an x64 build translated on ARM still presents arm. */
+function desktopArchitecture(): string {
+  if (process.arch.startsWith('arm') || app?.runningUnderARM64Translation) {
+    return 'arm'
+  }
+  return 'x86'
 }
 
 // Match the mobile UA version to the client-hint brands.
