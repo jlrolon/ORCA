@@ -62,6 +62,11 @@ export function normalizeCompatibleLifecycleEvent(
   if (source === 'codebuddy' && eventName === 'SessionStart') {
     return null
   }
+  // CodeBuddy fires PermissionRequest during auto-review, which can allow without a prompt;
+  // a real prompt still arrives as Notification(permission_prompt), as it does for Muse.
+  if (source === 'codebuddy' && eventName === 'PermissionRequest') {
+    return null
+  }
   const stateName =
     source === 'codebuddy' && eventName === 'PreToolUse'
       ? 'working'
