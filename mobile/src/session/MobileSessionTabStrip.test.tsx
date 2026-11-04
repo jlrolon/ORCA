@@ -1,11 +1,16 @@
 import { createContext, createElement, useMemo, useRef, useState } from 'react'
-import 'react-native'
-import 'lucide-react-native'
+import { Text } from 'react-native'
+import { File, FileText, Globe, SquareTerminal } from 'lucide-react-native'
 import { MobileAgentIcon } from '../components/MobileAgentIcon'
 import { AgentStateDot } from '../components/AgentStateDot'
-
-import './mobile-session-frame-styles'
-import './MobileSessionTabCardFooter'
+import { activateMobileUiLocale, getMobileUiLocale } from '../i18n/mobile-i18n'
+import {
+  applyMobileColorScheme,
+  getMobileColorScheme,
+  paletteForScheme
+} from '../theme/mobile-theme'
+import { mobileSessionFrameStyles } from './mobile-session-frame-styles'
+import { MobileSessionTabCardFooter } from './MobileSessionTabCardFooter'
 import { MobileSessionTitleBlock } from './MobileSessionTitleBlock'
 import type { NavBarButton } from '../components/nav-bar/NavBarButton'
 import type * as TabModule from './MobileSessionTab'
@@ -80,6 +85,7 @@ vi.mock('lucide-react-native', () => ({
   MoreHorizontal: 'Icon',
   PanelLeftOpen: 'Icon',
   Plus: 'Icon',
+  History: 'Icon',
   SquareTerminal: 'TerminalIcon',
   Columns2: 'Icon',
   SquareChevronRight: 'Icon'
@@ -137,6 +143,8 @@ vi.mock('./MobileSessionContentRow', () => ({
   }
 }))
 vi.mock('./MobileSessionSheets', () => ({ MobileSessionSheets: () => null }))
+vi.mock('./MobileTerminalFileTapSheet', () => ({ MobileTerminalFileTapSheet: () => null }))
+vi.mock('./MobileTerminalUrlTapSheet', () => ({ MobileTerminalUrlTapSheet: () => null }))
 vi.mock('./MobileWorkerAutoCloseStrip', () => ({ MobileWorkerAutoCloseStrip: () => null }))
 vi.mock('./MobileSessionTab', async (original) => {
   const actual = await original<typeof TabModule>()
@@ -178,7 +186,9 @@ vi.mock('../platform/keyboard-occlusion', () => ({
 vi.mock('../terminal/terminal-viewport-refit', () => ({
   useTerminalViewportRefit: () => ({ notifyKeyboardVisibility: () => {} })
 }))
-vi.mock('../worktree/last-visited-worktree-repo', () => ({ writeLastVisitedWorktree: () => {} }))
+vi.mock('../worktree/last-visited-worktree-by-host', () => ({
+  writeLastVisitedWorktree: async () => {}
+}))
 
 import { MobileSessionSurface } from './MobileSessionSurface'
 import { AnchoredDetailCard } from '../components/AnchoredDetailCard'
@@ -200,7 +210,12 @@ const visibleTabs = TAB_IDS.map((id) => ({
 
 function mountStrip(
   terminals: Pick<Controller['terminals'][number], 'handle' | 'agentIdentity'>[] = [],
-  initialTabs: Controller['visibleTabs'] = visibleTabs
+  initialTabs: Controller['visibleTabs'] = visibleTabs,
+  extras: {
+    showRecentSessionCardsAction?: boolean
+    showRecentSessionCards?: boolean
+    setShowRecentSessionCards?: (open: boolean) => void
+  } = {}
 ) {
   const scrollTo = vi.fn()
   const setRenameTarget = vi.fn()
@@ -249,7 +264,8 @@ function mountStrip(
         setRenameOpen(true)
       },
       visibleTabs: tabs,
-      terminals
+      terminals,
+      ...extras
     })
     return createElement(MobileSessionSurface, { controller })
   }
@@ -366,6 +382,25 @@ describe('MobileSessionTabStrip edge taps', () => {
     vi.unstubAllGlobals()
   })
 
+  it('opens recently used from the button beside New tab', () => {
+    const setShowRecentSessionCards = vi.fn()
+    const strip = mountStrip([], visibleTabs, {
+      showRecentSessionCardsAction: true,
+      showRecentSessionCards: false,
+      setShowRecentSessionCards
+    })
+    const recent = strip.root.findByProps({ accessibilityLabel: 'Recently Used' })
+    const newer = strip.root.findByProps({ accessibilityLabel: 'New tab' })
+    expect(recent.parent).toBe(newer.parent)
+    const labels = recent
+      .parent!.children.filter((child) => typeof child !== 'string')
+      .map((child) => child.props.accessibilityLabel)
+    expect(labels).toEqual(['New tab', 'Recently Used'])
+    act(() => recent.props.onPress())
+    expect(setShowRecentSessionCards).toHaveBeenCalledExactlyOnceWith(true)
+    strip.unmount()
+  })
+
   it('opens tab details in the compact Duo header while its title is absent', () => {
     work.sideRail = true
     const strip = mountStrip()
@@ -439,9 +474,10 @@ describe('MobileSessionTabStrip edge taps', () => {
     press('a')
     act(() => strip.card().props.onSettled(exiting))
     expect(strip.card().props).toMatchObject({ active: true, source: { key: 'tab:a' } })
+    strip.wait(400)
     strip.queue()
     act(() => scroll().props.onContentSizeChange(650))
-    act(() => scroll().props.onScrollBeginDrag())
+    press('a')
     strip.flush()
     expect(strip.card().props.active).toBe(false)
     strip.wait(400)
@@ -493,5 +529,271 @@ describe('MobileSessionTabStrip edge taps', () => {
     strip.flush()
     expect(strip.card().props).toMatchObject({ active: true, source: { key: 'tab:b' } })
     strip.unmount()
+  })
+
+  it('keeps an empty terminal heading readable as its open row and locale change', async () => {
+    const originalLocale = getMobileUiLocale()
+    const empty = { ...visibleTabs[0], title: '' }
+    const strip = mountStrip([], [empty])
+    try {
+      strip.tapAt(50)
+      const source = strip.card().props.source
+      const motion = strip.card().props.motion
+      const now = Date.now()
+      const heading = () => strip.card().findAllByType(Text)[0].props.children
+      expect(heading()).toBe('Terminal')
+      for (const title of ['First full shell title', '', 'Next full shell title']) {
+        const row = { ...empty, title }
+        strip.updateTabs([row])
+        expect(heading()).toBe(title || 'Terminal')
+        expect(row.title).toBe(title)
+        expect(strip.card().props.active).toBe(true)
+        expect(strip.card().props.source).toBe(source)
+        expect(strip.card().props.motion).toBe(motion)
+        expect(Date.now()).toBe(now)
+        if (title === '') {
+          await act(async () => activateMobileUiLocale('ja'))
+          expect(heading()).toBe('ターミナル')
+          expect(row.title).toBe('')
+          expect(Date.now()).toBe(now)
+          await act(async () => activateMobileUiLocale(originalLocale))
+        }
+      }
+      expect(empty.title).toBe('')
+    } finally {
+      strip.unmount()
+      await act(async () => activateMobileUiLocale(originalLocale))
+    }
+  })
+
+  it('renders representative per-kind content through Surface and the real footer', () => {
+    const samples: {
+      tab: Controller['visibleTabs'][number]
+      title: string
+      program: string
+      icon: typeof File | typeof MobileAgentIcon
+      agentId?: string
+      state?: string
+      detail?: string
+    }[] = [
+      {
+        tab: {
+          ...visibleTabs[0],
+          title: '✳ Fix tabs',
+          agentStatus: {
+            state: 'working',
+            agentType: 'claude',
+            paneKey: 't:l',
+            prompt: '',
+            updatedAt: 1000,
+            stateStartedAt: 1000,
+            stateHistory: []
+          }
+        },
+        title: 'Fix tabs',
+        program: 'Claude',
+        icon: MobileAgentIcon,
+        agentId: 'claude',
+        state: 'working'
+      },
+      {
+        tab: { ...visibleTabs[0], title: '  Full shell name · work  ' },
+        title: '  Full shell name · work  ',
+        program: 'Terminal',
+        icon: SquareTerminal
+      },
+      {
+        tab: {
+          type: 'agent-session',
+          id: 'a',
+          title: '✳ Chat',
+          agent: 'codex',
+          sessionId: 's',
+          isActive: true
+        },
+        title: 'Chat',
+        program: 'Codex',
+        icon: MobileAgentIcon,
+        agentId: 'codex'
+      },
+      ...(['file', 'markdown'] as const).map((type) => ({
+        tab: {
+          type,
+          id: 'a',
+          title: 'note.md',
+          filePath: '/docs/note.md',
+          relativePath: 'docs/note.md',
+          isDirty: false,
+          isActive: true,
+          documentVersion: '1'
+        },
+        title: 'note.md',
+        detail: 'docs/note.md',
+        program: 'Editor',
+        icon: type === 'file' ? File : FileText
+      })),
+      {
+        tab: {
+          type: 'browser',
+          id: 'a',
+          title: 'Search',
+          url: 'https://example.com/search',
+          browserWorkspaceId: 'w',
+          browserPageId: 'p',
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+          isActive: true
+        },
+        title: 'Search',
+        program: 'example.com/search',
+        icon: Globe
+      }
+    ]
+    for (const sample of samples) {
+      const strip = mountStrip([], [sample.tab])
+      strip.tapAt(50)
+      const card = strip.card()
+      const text = card.findAllByType(Text).map((node) => node.props.children)
+      expect(text).toEqual(
+        sample.detail
+          ? [sample.title, sample.detail, sample.program]
+          : [sample.title, sample.program]
+      )
+      const icons = card.findAllByType(sample.icon)
+      expect(icons).toHaveLength(1)
+      if (sample.agentId) {
+        expect(icons[0].props.agentId).toBe(sample.agentId)
+      }
+      expect(card.findAllByType(AgentStateDot).map((node) => node.props.state)).toEqual(
+        sample.state ? [sample.state] : []
+      )
+      strip.unmount()
+    }
+  })
+
+  it('repaints the cached footer immediately on dark-light-dark appearance changes', () => {
+    const originalScheme = getMobileColorScheme()
+    let strip: ReturnType<typeof mountStrip> | undefined
+    try {
+      act(() => applyMobileColorScheme('dark'))
+      strip = mountStrip([], [{ ...visibleTabs[0], title: 'Shell' }])
+      strip.tapAt(50)
+      const card = strip.card()
+      const footerElement = card.props.footer
+      const content = card.findByType(MobileSessionTabCardFooter).props.content
+      const anchor = card.props.anchor
+      const now = Date.now()
+      for (const scheme of ['dark', 'light', 'dark'] as const) {
+        act(() => applyMobileColorScheme(scheme))
+        expect(card.props.footer).toBe(footerElement)
+        expect(card.findByType(MobileSessionTabCardFooter).props.content).toBe(content)
+        expect(card.props.anchor).toBe(anchor)
+        expect(Date.now()).toBe(now)
+        expect(card.findByType(SquareTerminal).props.color).toBe(
+          paletteForScheme(scheme).textSecondary
+        )
+        const texts = card.findAllByType(Text)
+        expect(texts.map((text) => text.props.children)).toEqual(['Shell', 'Terminal'])
+        expect(texts[1].props.style).toBe(mobileSessionFrameStyles.sessionMetaText)
+        expect(texts[1].props.style.color).toBe(paletteForScheme(scheme).textSecondary)
+      }
+    } finally {
+      strip?.unmount()
+      act(() => applyMobileColorScheme(originalScheme))
+    }
+  })
+
+  it.each([20, 200])('bounds real refresh/measurement work with %i tabs and records', (size) => {
+    const tabs = Array.from({ length: size }, (_, i) => ({
+      ...visibleTabs[0],
+      get id() {
+        work.ids++
+        return `tab-${i}`
+      },
+      title: `tab-${i}`,
+      terminal: `term-${i}`
+    }))
+    const terminals = tabs.map((_, i) => ({
+      get handle() {
+        work.records++
+        return `term-${i}`
+      },
+      agentIdentity: 'cursor'
+    }))
+    const strip = mountStrip(terminals, tabs)
+    const reset = () =>
+      Object.assign(work, {
+        tabs: 0,
+        content: 0,
+        footer: 0,
+        rows: 0,
+        ids: 0,
+        records: 0,
+        measures: 0
+      })
+    const scroll = (x: number) =>
+      act(() =>
+        strip.root
+          .find((node) => node.props.horizontal === true)
+          .props.onScroll({ nativeEvent: { contentOffset: { x } } })
+      )
+    strip.wait(16) // Settle the keyboard mount RAF before the clock baseline.
+    // Settle the existing hidden-edge transition before measuring unchanged-edge work.
+    scroll(10)
+    scroll(10)
+    reset()
+    expect(vi.getTimerCount()).toBe(1) // Existing strip clock only, no closed-card clock.
+    strip.wait(60_000)
+    expect(work.content).toBe(0)
+    expect(work.footer).toBe(0)
+    expect(work.rows).toBe(0)
+    expect(work.records).toBe(0)
+    expect(work.tabs).toBe(size) // Pre-existing strip clock, linear in visible tabs.
+    expect(work.ids).toBeLessThanOrEqual(8 * size)
+    strip.tapAt(150)
+    strip.wait(400)
+    expect(vi.getTimerCount()).toBe(2)
+    const motion = strip.card().props.motion
+    for (const x of [10, 11, 12]) {
+      strip.queue()
+      reset()
+      scroll(x)
+      expect(work).toMatchObject({
+        tabs: 0,
+        content: 0,
+        footer: 0,
+        rows: 0,
+        ids: 0,
+        records: 0,
+        measures: 1
+      })
+      strip.flush() // Measurement settlement has its own act turn.
+      expect(work).toMatchObject({
+        tabs: 0,
+        content: 0,
+        footer: 0,
+        rows: 0,
+        ids: 0,
+        records: 0,
+        measures: 3
+      })
+      expect(strip.card().props).toMatchObject({ motion, anchor: { trigger: { x: 100 - x } } })
+      expect(strip.card().findByProps({ role: 'dialog' }).props.style[1].left).toBe(100 - x)
+    }
+    reset()
+    strip.wait(60_000)
+    expect(work).toMatchObject({ content: 1, footer: 1, rows: 0, records: 0, tabs: size })
+    expect(work.ids).toBeLessThanOrEqual(8 * size)
+    strip.updateTabs(
+      tabs.map((tab, i) => (i === 1 ? { ...tab, title: 'Renamed current tab' } : tab))
+    )
+    expect(strip.card().findAllByProps({ children: 'Renamed current tab' })).toHaveLength(1)
+    strip.tapAt(150)
+    expect(vi.getTimerCount()).toBe(1)
+    strip.unmount()
+    expect(work.back).toBeNull()
+    expect(work.removeAppState).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
   })
 })
