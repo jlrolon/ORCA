@@ -6,7 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { formatOptionalPrimaryShortcutLabel } from '@/hooks/useShortcutLabel'
 import { translate } from '@/i18n/i18n'
 import { openWorkspaceCreationComposerWithTourHandoff } from '../contextual-tours/workspace-creation-tour-handoff'
-import SidebarWorkspaceOptionsMenu from './SidebarWorkspaceOptionsMenu'
+import SidebarWorkspaceOptionsMenu from './worktree-list/controls/SidebarWorkspaceOptionsMenu'
 
 function AddProjectButton({
   preserveWorkspaceBoardOpen
@@ -25,6 +25,7 @@ function AddProjectButton({
           type="button"
           className="text-muted-foreground"
           aria-label={label}
+          data-contextual-tour-target="project-add-control"
           data-workspace-board-preserve-open={preserveWorkspaceBoardOpen ? '' : undefined}
           onClick={() => openModal('add-repo')}
         >
