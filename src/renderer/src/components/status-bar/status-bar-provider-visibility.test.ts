@@ -76,6 +76,7 @@ function usageSettings(overrides: Partial<UsageProviderSettings> = {}): UsagePro
     grokAuthConfigured: false,
     cursorAuthConfigured: false,
     zcodePlanApiKeyConfigured: false,
+    ollamaApiKeyConfigured: false,
     ...overrides
   }
 }
@@ -495,6 +496,12 @@ describe('isUsageEmptyState', () => {
     expect(isUsageEmptyState(settledProviders, usageSettings())).toBe(true)
     expect(isUsageEmptyState({ ...settledProviders, zcode: undefined }, usageSettings())).toBe(true)
     expect(isUsageEmptyState({ ...settledProviders, zcode: null }, usageSettings())).toBe(false)
+    expect(
+      isUsageEmptyState(
+        { ...settledProviders, ollama: provider('unavailable', { provider: 'ollama' }) },
+        usageSettings()
+      )
+    ).toBe(true)
   })
 
   it('does not show the setup CTA while checked Antigravity usage is awaiting a snapshot', () => {

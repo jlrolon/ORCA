@@ -15,6 +15,8 @@ export type UsageProviderSettings = Pick<
   minimaxApiKeyConfigured: boolean
   // Main reports safeStorage plan-key presence so ZCode survives reload before the first poll.
   zcodePlanApiKeyConfigured: boolean
+  // Ollama cloud key presence; renderer never sees the value.
+  ollamaApiKeyConfigured?: boolean
   // Main reports OpenCode key presence because the renderer cannot inspect its environment or CLI store.
   opencodeGoApiKeyConfigured: boolean
   grokAuthConfigured: boolean
@@ -32,6 +34,7 @@ type UsageProviderSnapshots = {
   grok: ProviderRateLimits | null | undefined
   cursor: ProviderRateLimits | null | undefined
   zcode?: ProviderRateLimits | null
+  ollama?: ProviderRateLimits | null
 }
 
 type UsageProviderId = ProviderRateLimits['provider']
@@ -78,7 +81,8 @@ export function hasUsageProviderSettings(
     settings?.minimaxApiKeyConfigured === true ||
     settings?.grokAuthConfigured === true ||
     settings?.cursorAuthConfigured === true ||
-    settings?.zcodePlanApiKeyConfigured === true
+    settings?.zcodePlanApiKeyConfigured === true ||
+    settings?.ollamaApiKeyConfigured === true
   )
 }
 
@@ -119,6 +123,9 @@ export function hasUsageProviderSettingsForProvider(
   }
   if (providerId === 'zcode') {
     return settings.zcodePlanApiKeyConfigured === true
+  }
+  if (providerId === 'ollama') {
+    return settings.ollamaApiKeyConfigured === true
   }
   return false
 }
@@ -175,7 +182,8 @@ export function isUsageEmptyState(
     isProviderSnapshotPending(providers.minimax) ||
     isProviderSnapshotPending(providers.grok) ||
     isProviderSnapshotPending(providers.cursor) ||
-    (providers.zcode !== undefined && isProviderSnapshotPending(providers.zcode))
+    (providers.zcode !== undefined && isProviderSnapshotPending(providers.zcode)) ||
+    (providers.ollama !== undefined && isProviderSnapshotPending(providers.ollama))
   ) {
     return false
   }
@@ -190,6 +198,7 @@ export function isUsageEmptyState(
     !isProviderConfigured(providers.minimax) &&
     !isProviderConfigured(providers.grok) &&
     !isProviderConfigured(providers.cursor) &&
-    !isProviderConfigured(providers.zcode)
+    !isProviderConfigured(providers.zcode) &&
+    !isProviderConfigured(providers.ollama)
   )
 }
