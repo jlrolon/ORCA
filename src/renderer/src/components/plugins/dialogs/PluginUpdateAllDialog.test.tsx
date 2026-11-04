@@ -172,7 +172,7 @@ describe('PluginUpdateAllDialog', () => {
     installApi({ previewMarketplaceUpdate: vi.fn().mockResolvedValue(worker) })
     const container = await renderDialog([entry('a', [])])
     expect(container.textContent).toContain(
-      'New: Full access: runs as a normal program and can read your files, use the network and run other programs.'
+      'New: Full access: runs as a normal program and can read your files, use the network, run other programs and control Orca, including your terminals and agents.'
     )
   })
 

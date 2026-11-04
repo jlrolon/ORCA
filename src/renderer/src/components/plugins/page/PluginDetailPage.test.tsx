@@ -294,7 +294,7 @@ describe('PluginDetailPage', () => {
     )
     expect(container.textContent).not.toContain('sandbox')
     expect(container.textContent).toContain(
-      'Full access: runs as a normal program and can read your files, use the network and run other programs.'
+      'Full access: runs as a normal program and can read your files, use the network, run other programs and control Orca, including your terminals and agents.'
     )
   })
 

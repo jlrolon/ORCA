@@ -339,7 +339,7 @@ describe('PluginManager catalog', () => {
     await act(async () => button('Review & install').click())
     expect(document.body.textContent).toContain('Can access')
     expect(document.body.textContent).toContain(
-      'Full access: runs as a normal program and can read your files, use the network and run other programs.'
+      'Full access: runs as a normal program and can read your files, use the network, run other programs and control Orca, including your terminals and agents.'
     )
 
     await act(async () => button('Install & enable').click())
