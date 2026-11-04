@@ -15,7 +15,7 @@ afterEach(() => {
   background.mockClear()
 })
 
-it('carries the accepted route across preparation and retains CLI startup/prompt under chat defaults', async () => {
+it('retains the accepted route and resolves project task drafts for either launch surface', async () => {
   const prepared: PreparedQuickSubmit = {
     submitLinkedWorkItem: {
       type: 'issue',
@@ -50,6 +50,11 @@ it('carries the accepted route across preparation and retains CLI startup/prompt
   }
   const settings = { ...getDefaultSettings('/test'), nativeChatProviders: EVERY_AGENT_CHAT }
   const original = useAppStore.getState().settings
+  const originalCatalog = {
+    repos: useAppStore.getState().repos,
+    projects: useAppStore.getState().projects,
+    projectHostSetups: useAppStore.getState().projectHostSetups
+  }
   const prepare = vi.fn<() => Promise<PreparedQuickSubmit | null>>()
   const { result } = renderHook(() =>
     useQuickCreationExecution({
@@ -104,7 +109,8 @@ it('carries the accepted route across preparation and retains CLI startup/prompt
       useAppStore.setState({
         settings: {
           ...settings,
-          nativeChatProviders: route === 'terminal-tui' ? EVERY_AGENT_CHAT : {}
+          nativeChatProviders: route === 'terminal-tui' ? EVERY_AGENT_CHAT : {},
+          linkedWorkItemPromptTemplate: '{{url}} /skill'
         }
       })
       await act(async () => {
@@ -147,8 +153,98 @@ it('carries the accepted route across preparation and retains CLI startup/prompt
       ).rejects.toThrow('Could not start OpenCode. Check Arguments in this setup')
       expect(background).toHaveBeenCalledTimes(count)
     }
+    const url = 'https://example.atlassian.net/browse/APP-123'
+    useAppStore.setState({
+      settings: { ...settings, linkedWorkItemPromptTemplate: '/global {{url}}' },
+      repos: [{ id: 'repo-1', path: '/repo', displayName: 'Repo', badgeColor: '', addedAt: 1 }],
+      projectHostSetups: [
+        {
+          id: 'repo-1',
+          projectId: 'project-1',
+          repoId: 'repo-1',
+          path: '/repo',
+          displayName: 'Repo',
+          hostId: 'local',
+          setupState: 'ready',
+          setupMethod: 'legacy-repo',
+          createdAt: 1,
+          updatedAt: 1
+        }
+      ],
+      projects: [
+        {
+          id: 'project-1',
+          displayName: 'Repo',
+          badgeColor: '',
+          sourceRepoIds: ['repo-1'],
+          createdAt: 1,
+          updatedAt: 1,
+          linkedWorkItemPromptTemplate: '{{url}} /jira-engineer'
+        }
+      ]
+    })
+    for (const route of ['terminal-tui', 'structured-native-chat'] as const) {
+      prepare.mockResolvedValueOnce({
+        ...prepared,
+        submitLinkedWorkItem: { provider: 'jira', type: 'issue', number: 0, title: 'Fix bug', url },
+        trimmedNote: 'Read first'
+      })
+      await act(async () => {
+        await result.current.executeQuickCreation(
+          { kind: 'none' },
+          'opencode',
+          'fix',
+          null,
+          'repo-1',
+          { launchChoice: { agent: 'opencode', route } }
+        )
+      })
+      expect(background.mock.calls.at(-1)?.[0]).toMatchObject({
+        agentLaunchRoute: route,
+        quickPrompt: '',
+        launchDraftPrompt: `Read first\n\n${url} /jira-engineer`,
+        promptDelivery: 'draft'
+      })
+    }
+    useAppStore.setState({
+      projectHostSetups: useAppStore.getState().projectHostSetups.map((setup) => ({
+        ...setup,
+        id: 'remote-setup',
+        projectId: 'repo:repo-1',
+        hostId: 'ssh:execution-b'
+      })),
+      projects: useAppStore.getState().projects.map((project) => ({
+        ...project,
+        id: 'repo:repo-1'
+      }))
+    })
+    prepare.mockResolvedValueOnce({
+      ...prepared,
+      submitLinkedWorkItem: { provider: 'jira', type: 'issue', number: 0, title: 'Fix bug', url },
+      trimmedNote: 'Read first'
+    })
+    await act(async () => {
+      await result.current.executeQuickCreation(
+        { kind: 'none' },
+        'opencode',
+        'fix',
+        {
+          kind: 'workspace-run',
+          projectId: 'repo:repo-1',
+          hostId: 'ssh:execution-b',
+          projectHostSetupId: 'remote-setup',
+          repoId: 'repo-1',
+          path: '/repo'
+        },
+        'repo-1'
+      )
+    })
+    expect(background.mock.calls.at(-1)?.[0]).toMatchObject({
+      launchDraftPrompt: `Read first\n\n${url} /jira-engineer`,
+      promptDelivery: 'draft'
+    })
   } finally {
-    useAppStore.setState({ settings: original })
+    useAppStore.setState({ settings: original, ...originalCatalog })
   }
 })
 

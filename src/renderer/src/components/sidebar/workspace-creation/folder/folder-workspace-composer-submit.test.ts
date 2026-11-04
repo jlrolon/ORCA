@@ -125,6 +125,70 @@ describe('submitFolderWorkspaceCreate', () => {
     vi.restoreAllMocks()
   })
 
+  it('uses the linked repository project prompt for a folder workspace draft', async () => {
+    const original = useAppStore.getState()
+    const url = linkedIssue.url
+    useAppStore.setState({
+      settings: {
+        ...getDefaultSettings('/test'),
+        ...original.settings,
+        linkedWorkItemPromptTemplate: '/global {{url}}'
+      },
+      repos: [{ id: 'repo-1', path: '/repo', displayName: 'Repo', badgeColor: '', addedAt: 1 }],
+      projects: [
+        {
+          id: 'repo:repo-1',
+          displayName: 'Repo',
+          badgeColor: '',
+          sourceRepoIds: ['repo-1'],
+          createdAt: 1,
+          updatedAt: 1,
+          linkedWorkItemPromptTemplate: '{{url}} /project'
+        }
+      ],
+      projectHostSetups: [
+        {
+          id: 'repo-1',
+          projectId: 'repo:repo-1',
+          repoId: 'repo-1',
+          hostId: 'local',
+          path: '/repo',
+          displayName: 'Repo',
+          setupState: 'ready',
+          setupMethod: 'legacy-repo',
+          createdAt: 1,
+          updatedAt: 1
+        }
+      ]
+    })
+    try {
+      await submitFolderWorkspaceCreate({
+        projectGroup: makeProjectGroup(),
+        name: '',
+        lastAutoName: '',
+        linkedWorkItem: linkedIssue,
+        note: '',
+        quickAgent: 'codex',
+        autoRenameBranchFromWork: false,
+        agentCmdOverrides: {},
+        createFolderWorkspace: vi.fn(async () => makeFolderWorkspace()),
+        onOpenChange: vi.fn()
+      })
+      expect(mocks.ensureAgentStartupInTerminal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          startup: expect.objectContaining({ draftPrompt: `${url} /project` })
+        })
+      )
+    } finally {
+      useAppStore.setState({
+        settings: original.settings,
+        repos: original.repos,
+        projects: original.projects,
+        projectHostSetups: original.projectHostSetups
+      })
+    }
+  })
+
   it('keeps linked Codex context out of submitted startup and pastes it as a draft', async () => {
     const createFolderWorkspace = vi.fn(async () => makeFolderWorkspace())
     const linkedWorkItem = {
