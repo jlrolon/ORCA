@@ -2,6 +2,7 @@ import {
   createMarkdownTokenizerStartCursor,
   getMarkdownTokenizerStartMarker
 } from './markdown-tokenizer-start'
+import { findProseUrlEnd } from '../../../../shared/prose-url-boundary'
 import {
   Hooks,
   Lexer,
@@ -75,10 +76,19 @@ class BlockquoteListTokenizer extends Tokenizer {
     }
     return undefined
   }
+
+  url(source: string): Tokens.Link | undefined {
+    const token = super.url(source)
+    if (!token) {
+      return undefined
+    }
+    const end = findProseUrlEnd(token.raw)
+    return end === -1 ? token : super.url(token.raw.slice(0, end))
+  }
 }
 
 export function createTiptapMarkedFacade(): typeof marked {
-  const registry = new Marked()
+  const registry = new Marked({ tokenizer: new BlockquoteListTokenizer() })
 
   // Tiptap 3.22.5 parses via new instance.Lexer, so that constructor must retain the injected private registry.
   class RegistryLexer extends Lexer {
@@ -110,7 +120,9 @@ export function createTiptapMarkedFacade(): typeof marked {
         ...registry.defaults,
         ...options,
         tokenizer:
-          options?.tokenizer ?? registry.defaults.tokenizer ?? new BlockquoteListTokenizer(),
+          options?.tokenizer && options.tokenizer !== registry.defaults.tokenizer
+            ? options.tokenizer
+            : new BlockquoteListTokenizer(),
         extensions: registry.defaults.extensions
       })
     }
