@@ -5,6 +5,10 @@ import {
 } from '../../../shared/agent-hook-listener/listener-limits'
 import { isAgentHookSource, type AgentHookSource } from '../../../shared/agent-hook-relay'
 import {
+  readClaudePermissionProjection,
+  type ClaudePermissionProjection
+} from '../../../shared/agent-hook-listener/claude-permission-facts'
+import {
   readClaudeSettledRequests,
   type ClaudeSettledRequest
 } from '../../../shared/agent-hook-listener/claude-settled-permission-requests'
@@ -27,6 +31,7 @@ export type RemoteAgentStatusEnvelope = {
   compactTrigger?: unknown
   toolUseId?: string
   claudeSettledRequests?: unknown
+  claudePermission?: unknown
   toolAgentId?: string
   teammateName?: string
   toolAgentType?: string
@@ -55,6 +60,7 @@ export type RemoteEnvelopeFields = {
   promptInteractionKey?: string
   toolUseId?: string
   claudeSettledRequests?: readonly ClaudeSettledRequest[]
+  claudePermission?: ClaudePermissionProjection
   toolAgentId?: string
   teammateName?: string
   toolAgentType?: string
@@ -71,6 +77,7 @@ export function normalizeRemoteEnvelopeFields(envelope: {
   promptInteractionKey?: string
   toolUseId?: string
   claudeSettledRequests?: unknown
+  claudePermission?: unknown
   isReplay?: boolean
   toolAgentId?: string
   teammateName?: string
@@ -78,11 +85,13 @@ export function normalizeRemoteEnvelopeFields(envelope: {
   providerSession?: unknown
 }): RemoteEnvelopeFields {
   const source = isAgentHookSource(envelope.source) ? envelope.source : undefined
+  const claudePermission =
+    source === 'claude' ? readClaudePermissionProjection(envelope.claudePermission) : undefined
+  // A replayed projection names the held request itself; its identity replaces the cached row's.
+  const row = claudePermission?.row
   return {
-    hookEventName:
-      typeof envelope.hookEventName === 'string' && envelope.hookEventName.trim().length > 0
-        ? envelope.hookEventName.trim()
-        : undefined,
+    ...readRemoteHookIdentity(row ?? envelope),
+    ...(claudePermission ? { claudePermission } : {}),
     source,
     providerPromptId:
       source === 'claude'
@@ -106,27 +115,31 @@ export function normalizeRemoteEnvelopeFields(envelope: {
       envelope.promptInteractionKey.trim().length > 0
         ? envelope.promptInteractionKey.trim()
         : undefined,
-    toolUseId:
-      typeof envelope.toolUseId === 'string' && envelope.toolUseId.trim().length > 0
-        ? envelope.toolUseId.trim()
-        : undefined,
     // Live hooks settle their own requests; retained settlements only repair replay gaps.
     claudeSettledRequests:
       source === 'claude' && envelope.isReplay === true
         ? readClaudeSettledRequests(envelope.claudeSettledRequests)
         : undefined,
-    toolAgentId:
-      typeof envelope.toolAgentId === 'string' && envelope.toolAgentId.trim().length > 0
-        ? envelope.toolAgentId.trim()
-        : undefined,
     teammateName:
       typeof envelope.teammateName === 'string' && envelope.teammateName.trim().length > 0
         ? envelope.teammateName.trim()
         : undefined,
-    toolAgentType:
-      typeof envelope.toolAgentType === 'string' && envelope.toolAgentType.trim().length > 0
-        ? envelope.toolAgentType.trim()
-        : undefined,
     providerSession: normalizeAgentProviderSession(envelope.providerSession) ?? undefined
+  }
+}
+
+function readRemoteHookIdentity(envelope: {
+  hookEventName?: string
+  toolUseId?: string
+  toolAgentId?: string
+  toolAgentType?: string
+}): Pick<RemoteEnvelopeFields, 'hookEventName' | 'toolUseId' | 'toolAgentId' | 'toolAgentType'> {
+  const read = (value: string | undefined) =>
+    typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
+  return {
+    hookEventName: read(envelope.hookEventName),
+    toolUseId: read(envelope.toolUseId),
+    toolAgentId: read(envelope.toolAgentId),
+    toolAgentType: read(envelope.toolAgentType)
   }
 }

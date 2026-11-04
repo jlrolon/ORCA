@@ -114,31 +114,24 @@ export abstract class AgentHookServerIngestRemote extends AgentHookServerIngestS
       promptInteractionKey,
       toolUseId,
       claudeSettledRequests,
+      claudePermission,
       toolAgentId,
       teammateName,
       toolAgentType,
       providerSession
     } = normalizeRemoteEnvelopeFields(envelope)
     if (envelope.statusUnavailable === true && envelope.payload === null) {
-      const previous = this.state.lastStatusByPaneKey.get(paneKey)
-      if (
-        (source === 'opencode' || source === 'opencode2') &&
-        previous?.connectionId === trimmedConnectionId &&
-        trimmedConnectionId !== null &&
-        previous.worktreeId === worktreeId &&
-        previous.source === source &&
-        previous.launchToken === envelope.launchToken &&
-        this.getAgentStatusDisposition(paneKey) !== 'suppress'
-      ) {
-        this.clearPaneState(paneKey, { statusUnavailable: true })
-      }
+      this.clearUnavailableRemoteStatus(paneKey, trimmedConnectionId, source, worktreeId, envelope)
       return
     }
     const age = envelope.evidenceAgeMs
     if (age !== undefined && (typeof age !== 'number' || !Number.isSafeInteger(age) || age < 0)) {
       return
     }
-    const validatedPayload = normalizeAgentStatusPayload(envelope.payload)
+    // A replayed projection carries the held request's own payload in place of the cached row's.
+    const validatedPayload = normalizeAgentStatusPayload(
+      claudePermission?.row?.payload ?? envelope.payload
+    )
     if (!validatedPayload) {
       return
     }
@@ -273,6 +266,7 @@ export abstract class AgentHookServerIngestRemote extends AgentHookServerIngestS
       compactTrigger,
       toolUseId,
       ...(claudeSettledRequests ? { claudeSettledRequests } : {}),
+      ...(claudePermission ? { claudePermission } : {}),
       toolAgentId,
       teammateName,
       toolAgentType,

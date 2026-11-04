@@ -47,6 +47,7 @@ export type PersistedAgentHookEventPayload = Omit<
   | 'statusAdmissionSession'
   | 'launchToken'
   | 'hostTurnRevision'
+  | 'claudeRequest'
   | 'promptInteractionKey'
   | 'programStatus'
   | 'programStatusOnly'

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentHookServer, _internals } from './server'
-import { buildBody, PANE } from './server.test-fixtures'
+import captures from '../../shared/agent-hook-listener/__fixtures__/declined-permission-hooks.json'
+import { buildBody, postHookEvent, PANE } from './server.test-fixtures'
 
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
@@ -587,5 +588,244 @@ describe('AgentHookServer listener replay', () => {
     } finally {
       server.stop()
     }
+  })
+})
+
+async function withClaudePane(
+  run: (
+    post: (raw: Record<string, unknown>) => Promise<string>,
+    server: AgentHookServer
+  ) => Promise<void>
+): Promise<void> {
+  const server = new AgentHookServer()
+  await server.start({ env: 'production' })
+  try {
+    await run(async (raw) => {
+      await postHookEvent(server, buildBody(raw))
+      return server.getStatusSnapshot()[0].state
+    }, server)
+  } finally {
+    server.stop()
+  }
+}
+
+const [start, submit] = captures.claudeDecline
+const root = { session_id: start.session_id, prompt_id: submit.prompt_id }
+const child = { agent_id: 'child-a', agent_type: 'general-purpose' }
+const readAt = (offset: number) => ({ tool_name: 'Read', tool_input: { file_path: '/x', offset } })
+const hook = (hook_event_name: string, fields: Record<string, unknown> = {}) => ({
+  ...root,
+  hook_event_name,
+  ...fields
+})
+const pre = (id: string, tool: Record<string, unknown>, owner = {}) =>
+  hook('PreToolUse', { ...tool, tool_use_id: id, ...owner })
+const ask = (tool: Record<string, unknown>, owner = {}) =>
+  hook('PermissionRequest', { ...tool, ...owner })
+const done = (id: string, tool: Record<string, unknown>, owner = {}) =>
+  hook('PostToolUse', { ...tool, tool_use_id: id, tool_response: 'ok', ...owner })
+const batch = (calls: [string, Record<string, unknown>][], owner = {}) =>
+  hook('PostToolBatch', {
+    tool_calls: calls.map(([tool_use_id, tool]) => ({ ...tool, tool_use_id, tool_response: 'r' })),
+    ...owner
+  })
+
+describe('the represented Claude request on its execution host', () => {
+  it.each([
+    ['claudeDecline', 5],
+    ['claudeParallel', 10],
+    ['claudeChild', 20]
+  ] as const)(
+    'keeps recorded %s waiting through siblings and child work, and clears at its own completed batch',
+    async (capture, settledAt) => {
+      await withClaudePane(async (post, server) => {
+        const raws = captures[capture]
+        const asked = raws.findIndex((raw) => raw.hook_event_name === 'PermissionRequest')
+        for (const [index, raw] of raws.entries()) {
+          if (raw.hook_event_name === 'Stop') {
+            break
+          }
+          const state = await post(raw)
+          if (index >= asked && index < settledAt) {
+            expect({ index, row: server.getStatusSnapshot()[0] }).toMatchObject({
+              index,
+              row: { state: 'waiting', toolName: 'Read' }
+            })
+          } else if (index >= settledAt) {
+            expect({ index, state }).toEqual({ index, state: 'working' })
+          }
+        }
+      })
+    }
+  )
+
+  it('restores the lead a child request displaced when the child’s own batch completes it', async () => {
+    await withClaudePane(async (post, server) => {
+      const tool = readAt(0)
+      await post(start)
+      await post(submit)
+      await post(hook('SubagentStart', child))
+      await post(pre('C', tool, child))
+      expect(await post(ask(tool, child))).toBe('waiting')
+      expect(await post(batch([['C', tool]], child))).toBe('working')
+      expect(server.getStatusSnapshot()[0].mainAgent?.state).toBe('working')
+    })
+  })
+
+  it('keeps a sole prompt waiting while its allowed identical sibling finishes, until the batch', async () => {
+    await withClaudePane(async (post) => {
+      const tool = readAt(0)
+      await post(start)
+      await post(submit)
+      // T's Pre comes last, so the request follows it; U's identical input must not end T's prompt.
+      await post(pre('U', tool))
+      await post(pre('T', tool))
+      expect(await post(ask(tool))).toBe('waiting')
+      expect(await post(done('U', tool))).toBe('waiting')
+      expect(
+        await post(
+          batch([
+            ['T', tool],
+            ['U', tool]
+          ])
+        )
+      ).toBe('working')
+    })
+  })
+
+  it('accepted (Brennan 2026-11-03): NC2 after an earlier batch release, an equal-preview sibling can clear a still-open prompt', async () => {
+    await withClaudePane(async (post) => {
+      const other = { tool_name: 'Read', tool_input: { file_path: '/a' } }
+      await post(start)
+      await post(submit)
+      await post(pre('A', other))
+      await post(ask(other))
+      expect(await post(batch([['A', other]]))).toBe('working')
+      await post(pre('T', readAt(0)))
+      await post(pre('U', readAt(100)))
+      expect(await post(ask(readAt(0)))).toBe('waiting')
+      // Main keeps T here (A stays held there, so T inherits nothing); the legacy preview inheritance now
+      // reads U as T's predecessor and its completion clears T while T is still open.
+      expect(await post(done('U', readAt(100)))).toBe('working')
+    })
+  })
+
+  it('accepted (Brennan 2026-11-03): NC1 a late older batch with the same input clears a newer sole prompt', async () => {
+    await withClaudePane(async (post) => {
+      const tool = readAt(0)
+      await post(start)
+      await post(submit)
+      await post(pre('T', tool))
+      expect(await post(ask(tool))).toBe('waiting')
+      // W's batch, same owner and input, delivered after T's request: main ignores it; the input match does not.
+      expect(await post(batch([['W', tool]]))).toBe('working')
+    })
+  })
+
+  it('keeps a later turn’s sole prompt when an earlier turn’s identical batch arrives late', async () => {
+    await withClaudePane(async (post) => {
+      const tool = readAt(0)
+      const first = { prompt_id: '11111111-1111-4111-8111-111111111111' }
+      const second = { prompt_id: '22222222-2222-4222-8222-222222222222' }
+      await post(start)
+      await post(hook('UserPromptSubmit', { prompt: 'first', ...first }))
+      await post(pre('W', tool, first))
+      await post(hook('Stop', first))
+      await post(hook('UserPromptSubmit', { prompt: 'second', ...second }))
+      await post(pre('T', tool, second))
+      expect(await post(ask(tool, second))).toBe('waiting')
+      // Both turns are known and differ, so W's batch cannot be T's; NC1 stays for one turn.
+      expect(await post(batch([['W', tool]], first))).toBe('waiting')
+      expect(await post(batch([['T', tool]], second))).toBe('working')
+    })
+  })
+
+  it('accepted (Brennan 2026-11-03): NC4 a helper’s request whose own end is lost outlives the parent’s finish', async () => {
+    await withClaudePane(async (post) => {
+      const helper = { agent_id: 'hook-agent-1' }
+      await post(start)
+      await post(submit)
+      await post(pre('H', readAt(0), helper))
+      expect(await post(ask(readAt(0), helper))).toBe('waiting')
+      // Main can show Done here; the request stays until the helper's own end or a real replacement.
+      expect(await post(hook('Stop'))).toBe('waiting')
+      expect(await post(hook('UserPromptSubmit', { prompt: 'Next' }))).toBe('working')
+    })
+  })
+
+  it('keeps the request through a lifecycle refresh of the waiting lead, so its batch still clears it', async () => {
+    await withClaudePane(async (post, server) => {
+      const tool = { tool_name: 'Read', tool_input: { file_path: '/a' } }
+      await post(start)
+      await post(hook('UserPromptSubmit', { prompt: 'Read /a' }))
+      await post(pre('A', tool))
+      expect(await post(ask(tool))).toBe('waiting')
+      expect(
+        await post(hook('SubagentStart', { agent_id: 'child-c', agent_type: 'general-purpose' }))
+      ).toBe('waiting')
+      expect(await post(batch([['A', tool]]))).toBe('working')
+
+      // A child's own request survives another child's start the same way, and its batch restores the lead.
+      await post(hook('SubagentStart', child))
+      await post(pre('C', readAt(0), child))
+      expect(await post(ask(readAt(0), child))).toBe('waiting')
+      await post(hook('SubagentStart', { agent_id: 'child-d', agent_type: 'general-purpose' }))
+      expect(await post(batch([['C', readAt(0)]], child))).toBe('working')
+      expect(server.getStatusSnapshot()[0].mainAgent?.state).toBe('working')
+
+      // A real newer dialog still replaces the request: its batch then leaves the question alone.
+      const question = {
+        tool_name: 'AskUserQuestion',
+        tool_input: { questions: [{ question: 'Which?' }] }
+      }
+      await post(pre('B', tool))
+      await post(ask(tool))
+      await post(pre('Q', question))
+      expect(await post(ask(question))).toBe('waiting')
+      await post(batch([['B', tool]]))
+      expect(server.getStatusSnapshot()[0]).toMatchObject({
+        state: 'waiting',
+        toolName: 'AskUserQuestion'
+      })
+    })
+  })
+
+  it('ends even a helper’s request when a new conversation starts, while compact and a parent Stop do not', async () => {
+    await withClaudePane(async (post) => {
+      const helper = { agent_id: 'hook-agent-1' }
+      await post(start)
+      await post(submit)
+      await post(pre('H', readAt(0), helper))
+      expect(await post(ask(readAt(0), helper))).toBe('waiting')
+      expect(await post(hook('PostCompact', { trigger: 'auto' }))).toBe('waiting')
+      expect(await post(hook('Stop'))).toBe('waiting')
+      // /clear: a genuinely new session, idle until its own first prompt.
+      const s2 = '22222222-2222-4222-8222-222222222222'
+      expect(await post({ ...start, session_id: s2, source: 'clear' })).toBe('done')
+      // The new conversation's own request still settles at its batch.
+      const next = { session_id: s2 }
+      await post({ ...submit, ...next })
+      await post({ ...pre('N', readAt(5)), ...next })
+      expect(await post({ ...ask(readAt(5)), ...next })).toBe('waiting')
+      expect(await post({ ...batch([['N', readAt(5)]]), ...next })).toBe('working')
+    })
+  })
+
+  it('ends a child’s request at a complete inventory that ends that child, but not while it still runs', async () => {
+    await withClaudePane(async (post) => {
+      await post(start)
+      await post(submit)
+      await post(hook('SubagentStart', child))
+      await post(pre('C', readAt(0), child))
+      expect(await post(ask(readAt(0), child))).toBe('waiting')
+      expect(
+        await post(
+          hook('Stop', {
+            background_tasks: [{ id: child.agent_id, type: 'subagent', status: 'running' }]
+          })
+        )
+      ).toBe('waiting')
+      expect(await post(hook('Stop', { background_tasks: [] }))).not.toBe('waiting')
+    })
   })
 })

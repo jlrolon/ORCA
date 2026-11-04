@@ -1,16 +1,25 @@
-import { mainAgentStatusEqual } from '../../../shared/main-agent-status'
+import { mainAgentStatusEqual } from '../main-agent-status'
+import { claudeTeammateIdMatchesName, isClaudeChildTurnEndEvent } from '../claude-subagent-roster'
+import { isAskUserQuestionTool } from '../agent-question-answered-intent'
+import type { AgentHookEventPayload } from './listener-event'
+import { isClaudePermissionSettledByReplay } from './claude-settled-permission-requests'
+import type { HookListenerState } from './listener-state'
 import {
-  claudeTeammateIdMatchesName,
-  isClaudeChildTurnEndEvent
-} from '../../../shared/claude-subagent-roster'
-import { isAskUserQuestionTool } from '../../../shared/agent-question-answered-intent'
-import type { AgentHookEventPayload } from '../../../shared/agent-hook-listener/listener-event'
-import { isClaudePermissionSettledByReplay } from '../../../shared/agent-hook-listener/claude-settled-permission-requests'
-import type { EnrichedAgentHookEventPayload } from './server-types'
+  childRequestOutlivesParentEnd,
+  claudeBatchSettlesRequest,
+  replacesSession,
+  restatesRequest
+} from './claude-permission-host-rules'
+
+export {
+  claudeBatchSettlesRequest,
+  holdClaudeRequest,
+  resumeClaudeRequestLead
+} from './claude-permission-host-rules'
 
 /** Retain the shell-work fact only with the main-agent observation that established it. */
 export function pairedClaudeNonAgentWork(
-  previous: EnrichedAgentHookEventPayload | undefined,
+  previous: AgentHookEventPayload | undefined,
   next: AgentHookEventPayload
 ): boolean | undefined {
   if (next.claudeRunningNonAgentTask !== undefined) {
@@ -22,10 +31,10 @@ export function pairedClaudeNonAgentWork(
 }
 
 /** Keep main-agent progress behind a child's permission prompt so restart cannot settle live work. */
-export function withHeldChildWaitMainAgent(
-  previous: EnrichedAgentHookEventPayload,
+export function withHeldChildWaitMainAgent<T extends AgentHookEventPayload>(
+  previous: T,
   next: AgentHookEventPayload
-): EnrichedAgentHookEventPayload {
+): T {
   const mainAgent = next.payload.mainAgent
   if (!previous.toolAgentId || !mainAgent) {
     return previous
@@ -41,12 +50,9 @@ export function withHeldChildWaitMainAgent(
   ) {
     return previous
   }
-  const { claudeRunningNonAgentTask: _unpaired, ...unpaired } = previous
   return {
-    ...unpaired,
-    ...(runningNonAgentTask !== undefined
-      ? { claudeRunningNonAgentTask: runningNonAgentTask }
-      : {}),
+    ...previous,
+    claudeRunningNonAgentTask: runningNonAgentTask,
     payload:
       mainAgentChanged || wakeupChanged
         ? { ...previous.payload, mainAgent, claudeTaskWakeupPending: pendingWakeup }
@@ -54,12 +60,25 @@ export function withHeldChildWaitMainAgent(
   }
 }
 
+/**
+ * `host` is the execution host deciding for its own observations (local hooks, a relay); without it this is
+ * the legacy decision a receiver applies to rows from a host that publishes no projection.
+ */
 export function shouldKeepClaudePermissionVisible(
-  previous: EnrichedAgentHookEventPayload | undefined,
-  next: AgentHookEventPayload
+  previous: AgentHookEventPayload | undefined,
+  next: AgentHookEventPayload,
+  host?: HookListenerState
 ): boolean {
   if (previous?.restoredUnconfirmed) {
     return false
+  }
+  if (
+    host &&
+    previous &&
+    !replacesSession(next) &&
+    (childRequestOutlivesParentEnd(host, previous, next) || restatesRequest(previous, next))
+  ) {
+    return true
   }
   if (
     previous?.payload.agentType !== 'claude' ||
@@ -79,6 +98,9 @@ export function shouldKeepClaudePermissionVisible(
   if (isClaudePermissionSettledByReplay(previous, next)) {
     return false
   }
+  if (host && claudeBatchSettlesRequest(previous, next)) {
+    return false
+  }
   if (isClaudePermissionResumingApprovedTool(previous, next)) {
     return false
   }
@@ -89,8 +111,8 @@ export function shouldKeepClaudePermissionVisible(
   return true
 }
 
-function isClaudePermissionOwningChildEnding(
-  previous: EnrichedAgentHookEventPayload,
+export function isClaudePermissionOwningChildEnding(
+  previous: AgentHookEventPayload,
   next: AgentHookEventPayload
 ): boolean {
   const ownerId = previous.toolAgentId?.trim()
@@ -108,7 +130,7 @@ function isClaudePermissionOwningChildEnding(
 }
 
 function isClaudePermissionResumingApprovedTool(
-  previous: EnrichedAgentHookEventPayload,
+  previous: AgentHookEventPayload,
   next: AgentHookEventPayload
 ): boolean {
   const previousToolUseId = previous.toolUseId?.trim() || undefined
@@ -161,7 +183,7 @@ function isClaudePermissionResumingApprovedTool(
 }
 
 export function shouldInheritClaudeToolUseIdForPermission(
-  previous: EnrichedAgentHookEventPayload | undefined,
+  previous: AgentHookEventPayload | undefined,
   next: AgentHookEventPayload
 ): boolean {
   if (
@@ -196,7 +218,7 @@ export function shouldInheritClaudeToolUseIdForPermission(
 }
 
 export function attachClaudePermissionToolUseId(
-  previous: EnrichedAgentHookEventPayload | undefined,
+  previous: AgentHookEventPayload | undefined,
   next: AgentHookEventPayload
 ): AgentHookEventPayload {
   const inheritedToolUseId = previous?.toolUseId

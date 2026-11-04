@@ -4,6 +4,7 @@ import { buildSpoolHookBody, type SpoolRecord } from '../../../shared/agent-hook
 import { checkHookOwnerPresence, restateHookRoot } from '../../../shared/agent-hook-owner-presence'
 import type { HookRootEvidenceReader } from '../../../shared/hook-process-root-evidence'
 import { normalizeHookPayload } from '../../../shared/agent-hook-listener'
+import { claudeBatchSettlesRequest } from '../../../shared/agent-hook-listener/claude-permission-transition'
 import { isAgentHookSource, type AgentHookSource } from '../../../shared/agent-hook-relay'
 import {
   bindOpenCodeTuiSession,
@@ -91,6 +92,28 @@ export abstract class AgentHookServerIngestNormalization extends AgentHookServer
     return applied
   }
 
+  /** An OpenCode relay that lost status retires only the row its own connection and launch wrote. */
+  protected clearUnavailableRemoteStatus(
+    paneKey: string,
+    connectionId: string | null,
+    source: AgentHookSource | undefined,
+    worktreeId: string | undefined,
+    envelope: { launchToken?: string }
+  ): void {
+    const previous = this.state.lastStatusByPaneKey.get(paneKey)
+    if (
+      (source === 'opencode' || source === 'opencode2') &&
+      previous?.connectionId === connectionId &&
+      connectionId !== null &&
+      previous.worktreeId === worktreeId &&
+      previous.source === source &&
+      previous.launchToken === envelope.launchToken &&
+      this.getAgentStatusDisposition(paneKey) !== 'suppress'
+    ) {
+      this.clearPaneState(paneKey, { statusUnavailable: true })
+    }
+  }
+
   protected setClaudeBackgroundEvidence(
     paneKey: string,
     hasRunningTask: boolean,
@@ -148,7 +171,17 @@ export abstract class AgentHookServerIngestNormalization extends AgentHookServer
     }
     const previousRunningTask = this.state.claudeRunningNonAgentTaskPaneKeys.has(paneKey)
     const previousActiveCron = this.state.claudeActiveSessionCronPaneKeys.has(paneKey)
-    const event = normalizeHookPayload(this.state, source, body, this.env)
+    const normalized = normalizeHookPayload(this.state, source, body, this.env)
+    // A batch ending no request this host shows is main's no-op; a replayed one is history, not evidence.
+    const event =
+      normalized?.claudeBatch &&
+      (isReplay ||
+        !claudeBatchSettlesRequest(
+          this.state.lastStatusByPaneKey.get(normalized.paneKey),
+          normalized
+        ))
+        ? null
+        : normalized
     const transcriptPath = event?.providerSession?.transcriptPath
     if (transcriptPath) {
       // A wrapper's CLAUDE_CONFIG_DIR is only visible here; History scans it too (#23505).

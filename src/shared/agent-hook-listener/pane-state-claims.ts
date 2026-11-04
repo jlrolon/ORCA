@@ -6,6 +6,7 @@ export function paneHasStateClaims(state: HookListenerState, paneKey: string): b
     state.lastStatusByPaneKey.has(paneKey) ||
     state.claudeSubagentRosterByPaneKey.has(paneKey) ||
     state.claudeLeadStateByPaneKey.has(paneKey) ||
+    state.claudePermissionRequestByPaneKey.has(paneKey) ||
     state.claudeRunningNonAgentTaskPaneKeys.has(paneKey) ||
     state.claudeActiveSessionCronPaneKeys.has(paneKey) ||
     state.claudeLaunchedBackgroundTasksByPaneKey.has(paneKey) ||

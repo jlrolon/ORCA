@@ -1,0 +1,491 @@
+import { describe, expect, it } from 'vitest'
+import type { normalizeHookPayload } from '../shared/agent-hook-listener'
+import {
+  clearPaneCacheState,
+  createHookListenerState
+} from '../shared/agent-hook-listener/listener-state'
+import type { AgentHookRelayEnvelope } from '../shared/agent-hook-relay'
+import { makePaneKey } from '../shared/stable-pane-id'
+import type { AgentSubagentSnapshot } from '../shared/agent-status-types'
+import type { AgentHookEventPayload } from '../shared/agent-hook-listener/listener-event'
+import {
+  decideRelayClaudePermission,
+  relayClaudeReplayProjection
+} from './agent-hook-claude-permission-host'
+import type { CachedPaneEnvelopeMeta } from './agent-hook-cached-pane-status'
+import { applyRelayHookEvent } from './agent-hook-event-admission'
+import { RelayProviderHookNormalization } from './agent-hook-provider-normalization'
+
+const pane = makePaneKey('permission', '11111111-1111-4111-8111-111111111111')
+const session = '11111111-1111-4111-8111-111111111111'
+const read = (path: string) => ({ tool_name: 'Read', tool_input: { file_path: path } })
+
+type Visits = { count: number }
+
+/** Test-side counter of every element production code reads from a Map by lookup or iteration. */
+class CountedMap<K, V> extends Map<K, V> {
+  constructor(
+    entries: Map<K, V>,
+    private readonly visits: Visits
+  ) {
+    super(entries)
+  }
+
+  override get(key: K): V | undefined {
+    this.visits.count++
+    return super.get(key)
+  }
+
+  override has(key: K): boolean {
+    this.visits.count++
+    return super.has(key)
+  }
+
+  override *entries(): MapIterator<[K, V]> {
+    for (const item of super.entries()) {
+      this.visits.count++
+      yield item
+    }
+  }
+
+  override *keys(): MapIterator<K> {
+    for (const item of super.keys()) {
+      this.visits.count++
+      yield item
+    }
+  }
+
+  override *values(): MapIterator<V> {
+    for (const item of super.values()) {
+      this.visits.count++
+      yield item
+    }
+  }
+
+  override [Symbol.iterator](): MapIterator<[K, V]> {
+    return this.entries()
+  }
+}
+
+/** Test-side counter of every field production reads from one roster row. */
+class CountedSubagent implements AgentSubagentSnapshot {
+  constructor(
+    private readonly row: AgentSubagentSnapshot,
+    private readonly visits: Visits
+  ) {}
+
+  private read<F extends keyof AgentSubagentSnapshot>(field: F): AgentSubagentSnapshot[F] {
+    this.visits.count++
+    return this.row[field]
+  }
+
+  get id() {
+    return this.read('id')
+  }
+  get state() {
+    return this.read('state')
+  }
+  get startedAt() {
+    return this.read('startedAt')
+  }
+  get agentType() {
+    return this.read('agentType')
+  }
+  get model() {
+    return this.read('model')
+  }
+  get description() {
+    return this.read('description')
+  }
+}
+
+/** Test-side counter of every row and field production reads from a roster. */
+function countedRoster(
+  rows: AgentSubagentSnapshot[] | undefined,
+  visits: Visits
+): AgentSubagentSnapshot[] | undefined {
+  if (!rows) {
+    return rows
+  }
+  const counted: AgentSubagentSnapshot[] = []
+  rows.forEach((row, index) => {
+    const element = new CountedSubagent(row, visits)
+    Object.defineProperty(counted, index, {
+      enumerable: true,
+      get: () => {
+        visits.count++
+        return element
+      }
+    })
+  })
+  return counted
+}
+
+describe('relay execution-host permission state', () => {
+  it('keeps one represented request and constant work however many silent helpers came before (N vs 10N)', () => {
+    const measured = [50, 500].map((helpers) => {
+      const state = createHookListenerState()
+      const provider = new RelayProviderHookNormalization()
+      let cached: ReturnType<typeof normalizeHookPayload> = null
+      const send = (hook_event_name: string, fields: Record<string, unknown> = {}) => {
+        const event = provider.normalize(
+          state,
+          'claude',
+          { paneKey: pane, payload: { session_id: session, hook_event_name, ...fields } },
+          'production'
+        )
+        if (!event) {
+          return undefined
+        }
+        const decision = decideRelayClaudePermission(state, cached ?? undefined, event, false)
+        if (decision.kind === 'publish') {
+          cached = decision.event
+        }
+        return decision
+      }
+      send('SessionStart', { source: 'startup' })
+      send('UserPromptSubmit', { prompt: 'Read the notes' })
+      // Helpers whose calls never settle and who never report an end leave nothing for later requests.
+      for (let i = 0; i < helpers; i++) {
+        send('PreToolUse', { ...read(`/h${i}`), tool_use_id: `h${i}`, agent_id: `hook-agent-${i}` })
+      }
+      const visits = { count: 0 }
+      state.claudePermissionRequestByPaneKey = new CountedMap(
+        state.claudePermissionRequestByPaneKey,
+        visits
+      )
+      state.claudeLeadStateByPaneKey = new CountedMap(state.claudeLeadStateByPaneKey, visits)
+      state.claudeSubagentRosterByPaneKey = new CountedMap(
+        state.claudeSubagentRosterByPaneKey,
+        visits
+      )
+      send('PreToolUse', { ...read('/t'), tool_use_id: 'T' })
+      send('PermissionRequest', read('/t'))
+      const released = send('PostToolBatch', { tool_calls: [{ ...read('/t'), tool_use_id: 'T' }] })
+      return {
+        retained: state.claudePermissionRequestByPaneKey.size,
+        released: released?.kind === 'publish' && released.event.payload.state === 'working',
+        visits: visits.count
+      }
+    })
+    expect(measured[0]).toMatchObject({ retained: 1, released: true })
+    expect(measured[1]).toEqual(measured[0])
+  })
+
+  it("compares a held request's roster in work linear in the rosters, and keeps no retired roster (N vs 10N)", () => {
+    const id = (i: number) => `c${String(i).padStart(4, '0')}`
+    const measured = [50, 500].map((children) => {
+      const state = createHookListenerState()
+      const provider = new RelayProviderHookNormalization()
+      // The relay's latest published row, held in an object since only the closures below assign it.
+      const published: { event: ReturnType<typeof normalizeHookPayload> } = { event: null }
+      const normalize = (hook_event_name: string, fields: Record<string, unknown> = {}) =>
+        provider.normalize(
+          state,
+          'claude',
+          { paneKey: pane, payload: { session_id: session, hook_event_name, ...fields } },
+          'production'
+        )
+      const decide = (event: NonNullable<ReturnType<typeof normalize>>) => {
+        const decision = decideRelayClaudePermission(
+          state,
+          published.event ?? undefined,
+          event,
+          false
+        )
+        if (decision.kind === 'publish') {
+          published.event = decision.event
+        }
+        return decision
+      }
+      const send = (hook_event_name: string, fields: Record<string, unknown> = {}) => {
+        const event = normalize(hook_event_name, fields)
+        return event ? decide(event) : undefined
+      }
+      const request = () => state.claudePermissionRequestByPaneKey.get(pane)
+      // One trigger's comparison work: the roster is materialized and sorted before counting starts.
+      const measure = (hook_event_name: string, fields: Record<string, unknown>) => {
+        const normalized = normalize(hook_event_name, fields)!
+        const held = request()!
+        const previous = held.payload.subagents
+        const next = normalized.payload.subagents
+        // Each observation normalizes its own snapshot, so equal content is never a shared list.
+        expect(next !== undefined && next === previous).toBe(false)
+        const visits = { count: 0 }
+        const countedPrevious = countedRoster(previous, visits)
+        const countedNext = countedRoster(next, visits)
+        // Cached rows are frozen: count on copies of the held request and the observation.
+        const requests = state.claudePermissionRequestByPaneKey
+        requests.set(pane, { ...held, payload: { ...held.payload, subagents: countedPrevious } })
+        const decision = decide({
+          ...normalized,
+          payload: { ...normalized.payload, subagents: countedNext }
+        })
+        // Put plain rosters back wherever the counted ones landed, before any assertion reads them.
+        const plain = (rows: AgentSubagentSnapshot[] | undefined) =>
+          rows === countedPrevious ? previous : rows === countedNext ? next : rows
+        const restore = (row: AgentHookEventPayload): AgentHookEventPayload => {
+          const projected = row.claudePermission?.row
+          return {
+            ...row,
+            payload: { ...row.payload, subagents: plain(row.payload.subagents) },
+            ...(projected && row.claudePermission
+              ? {
+                  claudePermission: {
+                    ...row.claudePermission,
+                    row: {
+                      ...projected,
+                      payload: {
+                        ...projected.payload,
+                        subagents: plain(projected.payload.subagents)
+                      }
+                    }
+                  }
+                }
+              : {})
+          }
+        }
+        requests.set(pane, restore(request()!))
+        published.event = restore(published.event!)
+        expect(decision).toMatchObject({
+          kind: 'publish',
+          event: { claudePermission: { held: true } }
+        })
+        expect(request()).toMatchObject({
+          hookEventName: 'PermissionRequest',
+          claudeRequest: held.claudeRequest,
+          payload: { state: 'waiting', toolName: 'Read' }
+        })
+        return { visits: visits.count, population: (previous?.length ?? 0) + (next?.length ?? 0) }
+      }
+      send('SessionStart', { source: 'startup' })
+      send('UserPromptSubmit', { prompt: 'Read the notes' })
+      for (let i = 0; i < children; i++) {
+        send('SubagentStart', { agent_id: id(i), agent_type: 'general-purpose' })
+      }
+      send('PreToolUse', { ...read('/a'), tool_use_id: 'A' })
+      send('PermissionRequest', read('/a'))
+      expect(request()?.payload.subagents).toHaveLength(children)
+      const last = request()!.payload.subagents!.at(-1)!.id
+
+      const equal = measure('SubagentStart', { agent_id: id(0), agent_type: 'general-purpose' })
+      expect(request()?.payload.subagents).toHaveLength(children)
+      const changed = measure('SubagentStart', { agent_id: last, agent_type: 'Explore' })
+      expect(request()?.payload.subagents?.at(-1)).toMatchObject({ id: last, agentType: 'Explore' })
+      const grown = measure('SubagentStart', { agent_id: 'c9999', agent_type: 'Explore' })
+      expect(request()?.payload.subagents).toHaveLength(children + 1)
+
+      for (const child of [...Array(children).keys()].map(id).concat('c9999')) {
+        expect(send('SubagentStop', { agent_id: child })).toMatchObject({
+          event: { claudePermission: { held: true } }
+        })
+      }
+      // Nothing retired stays behind the held request, its forwarded row or its replay.
+      expect(request()?.payload.subagents ?? []).toHaveLength(0)
+      expect(published.event?.payload.subagents ?? []).toHaveLength(0)
+      expect(relayClaudeReplayProjection(state, pane)?.row?.payload.subagents ?? []).toHaveLength(0)
+      const retired = measure('SubagentStop', { agent_id: id(0) })
+
+      const released = send('PostToolBatch', { tool_calls: [{ ...read('/a'), tool_use_id: 'A' }] })
+      expect(released).toMatchObject({ kind: 'publish', event: { payload: { state: 'working' } } })
+      expect(request()).toBeNull()
+      return { equal, changed, grown, retired }
+    })
+    for (const { equal, changed, grown, retired } of measured) {
+      // A full comparison reads every row of both rosters; a change on the last row is found there.
+      expect(equal.visits).toBeGreaterThanOrEqual(equal.population)
+      expect(changed.visits).toBeGreaterThanOrEqual(changed.population)
+      for (const { visits, population } of [equal, changed, grown, retired]) {
+        expect(visits).toBeLessThanOrEqual(8 * population + 16)
+      }
+      expect(retired).toEqual(measured[0].retired)
+    }
+  })
+
+  it('builds no roster for a batch that ends nothing, and the full current row for one that releases (N vs 10N)', () => {
+    const schedules = ['no request', 'foreign owner', 'releasing'] as const
+    const measure = (children: number, schedule: (typeof schedules)[number]) => {
+      const state = createHookListenerState()
+      const provider = new RelayProviderHookNormalization()
+      let cached: ReturnType<typeof normalizeHookPayload> = null
+      const send = (hook_event_name: string, fields: Record<string, unknown> = {}) => {
+        const event = provider.normalize(
+          state,
+          'claude',
+          { paneKey: pane, payload: { session_id: session, hook_event_name, ...fields } },
+          'production'
+        )
+        const decision =
+          event && decideRelayClaudePermission(state, cached ?? undefined, event, false)
+        if (decision?.kind === 'publish') {
+          cached = decision.event
+        }
+        return decision
+      }
+      send('SessionStart', { source: 'startup' })
+      send('UserPromptSubmit', { prompt: 'Read the notes' })
+      for (let i = 0; i < children; i++) {
+        send('SubagentStart', { agent_id: `child-${i}`, agent_type: 'general-purpose' })
+      }
+      const owner = schedule === 'foreign owner' ? { agent_id: 'child-0' } : {}
+      if (schedule !== 'no request') {
+        send('PreToolUse', { ...read('/a'), tool_use_id: 'A', ...owner })
+        send('PermissionRequest', { ...read('/a'), ...owner })
+      }
+      // Every child the batch's normalization or decision visits in the live roster, counted test-side.
+      const visits = { count: 0 }
+      const rosters = state.claudeSubagentRosterByPaneKey
+      rosters.set(pane, new CountedMap(rosters.get(pane)!, visits))
+      const decision = send('PostToolBatch', { tool_calls: [{ ...read('/a'), tool_use_id: 'A' }] })
+      return {
+        visits: visits.count,
+        kind: decision?.kind,
+        state: decision?.kind === 'publish' ? decision.event.payload.state : undefined,
+        roster: decision?.kind === 'publish' ? decision.event.payload.subagents?.length : undefined
+      }
+    }
+    for (const schedule of schedules) {
+      const [small, large] = [50, 500].map((children) => measure(children, schedule))
+      if (schedule === 'releasing') {
+        // The release is the one batch that needs a new status: it builds the whole current roster.
+        expect(small).toMatchObject({ kind: 'publish', state: 'working', roster: 50 })
+        expect(large).toMatchObject({ kind: 'publish', state: 'working', roster: 500 })
+        expect(large.visits).toBeGreaterThanOrEqual(500)
+      } else {
+        expect({ schedule, small, large }).toEqual({
+          schedule,
+          small: { visits: small.visits, kind: small.kind, state: undefined, roster: undefined },
+          large: { visits: small.visits, kind: small.kind, state: undefined, roster: undefined }
+        })
+        expect({ schedule, visits: small.visits }).toEqual({ schedule, visits: 0 })
+      }
+    }
+  })
+
+  it('reads a batch call’s input only for a request its scope admits, and ids alone for a provider id (B vs 10B)', () => {
+    const write = (path: string) => ({ tool_name: 'Write', tool_input: { file_path: path } })
+    /** A completed call whose input read is counted test-side: digesting it is the work measured. */
+    const counted = (path: string, id: string, reads: { count: number }) => {
+      const { tool_input: input, ...call } = { ...write(path), tool_use_id: id }
+      return Object.defineProperty({ ...call }, 'tool_input', {
+        enumerable: true,
+        get: () => {
+          reads.count++
+          return input
+        }
+      })
+    }
+    const schedules = ['no request', 'foreign owner', 'provider id', 'anonymous'] as const
+    const measure = (calls: number, schedule: (typeof schedules)[number]) => {
+      const state = createHookListenerState()
+      const provider = new RelayProviderHookNormalization()
+      let cached: ReturnType<typeof normalizeHookPayload> = null
+      const send = (hook_event_name: string, fields: Record<string, unknown> = {}) => {
+        const event = provider.normalize(
+          state,
+          'claude',
+          { paneKey: pane, payload: { session_id: session, hook_event_name, ...fields } },
+          'production'
+        )
+        const decision =
+          event && decideRelayClaudePermission(state, cached ?? undefined, event, false)
+        if (decision?.kind === 'publish') {
+          cached = decision.event
+        }
+        return decision
+      }
+      send('SessionStart', { source: 'startup' })
+      send('UserPromptSubmit', { prompt: 'Write the notes' })
+      const owner = schedule === 'foreign owner' ? { agent_id: 'child-x' } : {}
+      if (schedule !== 'no request') {
+        send('PreToolUse', { ...write('/t'), tool_use_id: 'T', ...owner })
+        send('PermissionRequest', {
+          ...write('/t'),
+          ...owner,
+          ...(schedule === 'provider id' ? { tool_use_id: 'T' } : {})
+        })
+      }
+      const reads = { count: 0 }
+      const decision = send('PostToolBatch', {
+        tool_calls: [
+          ...Array.from({ length: calls }, (_, i) => counted(`/w${i}`, `w${i}`, reads)),
+          counted('/t', 'T', reads)
+        ]
+      })
+      return {
+        reads: reads.count,
+        released: decision?.kind === 'publish' && decision.event.payload.state === 'working'
+      }
+    }
+    for (const schedule of schedules) {
+      const [small, large] = [5, 50].map((calls) => measure(calls, schedule))
+      expect({ schedule, released: small.released }).toEqual({
+        schedule,
+        released: schedule === 'provider id' || schedule === 'anonymous'
+      })
+      expect(large.released).toBe(small.released)
+      if (schedule === 'anonymous') {
+        // The correctness control: whole-input matching reads each same-tool call at most once.
+        expect(small.reads).toBeGreaterThan(0)
+        expect(large.reads).toBeLessThanOrEqual(51)
+      } else {
+        expect({ schedule, reads: [small.reads, large.reads] }).toEqual({ schedule, reads: [0, 0] })
+      }
+    }
+  })
+
+  it('retains no batch call in either relay cache after a no-op or a releasing batch', () => {
+    const canonical = createHookListenerState()
+    const provider = new RelayProviderHookNormalization()
+    const forwarded: AgentHookRelayEnvelope[] = []
+    const host = {
+      state: canonical,
+      metadata: new Map<string, CachedPaneEnvelopeMeta>(),
+      isCanonicalPane: () => false,
+      isPaneSurfaceRetired: () => false,
+      clearPaneState: (paneKey: string) => clearPaneCacheState(canonical, paneKey),
+      clearAssistantMessageRetry: () => {},
+      forward: (envelope: AgentHookRelayEnvelope) => {
+        forwarded.push(envelope)
+      },
+      checkAgentPresence: async () => {}
+    }
+    const send = (hook_event_name: string, fields: Record<string, unknown> = {}) => {
+      const event = provider.normalize(
+        canonical,
+        'claude',
+        { paneKey: pane, payload: { session_id: session, hook_event_name, ...fields } },
+        'production'
+      )
+      return event ? applyRelayHookEvent(host, event, 'claude') : undefined
+    }
+    const cachedRows = () => [
+      canonical.lastStatusByPaneKey.get(pane),
+      provider['states'].get('claude')?.lastStatusByPaneKey.get(pane)
+    ]
+    const calls = Array.from({ length: 20 }, (_, i) => ({
+      ...read(`/w${i}`),
+      tool_use_id: `w${i}`
+    }))
+    send('SessionStart', { source: 'startup' })
+    send('UserPromptSubmit', { prompt: 'Read the notes' })
+    send('PostToolBatch', { tool_calls: calls })
+    expect(cachedRows().map((row) => [!!row, row?.claudeBatch])).toEqual([
+      [true, undefined],
+      [true, undefined]
+    ])
+    send('PreToolUse', { ...read('/a'), tool_use_id: 'A' })
+    send('PermissionRequest', read('/a'))
+    expect(canonical.lastStatusByPaneKey.get(pane)?.payload.state).toBe('waiting')
+    send('PostToolBatch', { tool_calls: [...calls, { ...read('/a'), tool_use_id: 'A' }] })
+    expect(cachedRows().map((row) => [!!row, row?.claudeBatch])).toEqual([
+      [true, undefined],
+      [true, undefined]
+    ])
+    expect(canonical.lastStatusByPaneKey.get(pane)?.payload.state).toBe('working')
+    // The release is the pane's current state: forwarded, and what a reconnect replays.
+    expect(forwarded.at(-1)).toMatchObject({ payload: { state: 'working' } })
+    expect(canonical.claudePermissionRequestByPaneKey.get(pane)).toBeNull()
+    expect(relayClaudeReplayProjection(canonical, pane)).toEqual({ version: 1 })
+  })
+})

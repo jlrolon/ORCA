@@ -1,3 +1,4 @@
+import { readClaudePermissionFacts } from './agent-hook-listener/claude-permission-facts'
 import { readHookAgentProcess } from './agent-process-presence'
 import { isInheritedHookStatus } from './agent-hook-presence-transition'
 import { readHookProcessAdmission } from './agent-hook-owner-presence'
@@ -239,10 +240,19 @@ export function normalizeHookPayload(
     eventName === 'session_start' &&
     providerSession !== null
   // A transcript session_start carries resume identity while idle; receivers discard the placeholder row.
+  const claudeFacts =
+    source === 'claude' ? readClaudePermissionFacts(eventName, hookPayloadRecord) : {}
+  // A batch has no status of its own: it restates the pane's row unchanged. Only a host that finds it ends
+  // the request it represents builds the resumed lead, so a batch ending nothing costs no roster work.
   const transportPayload =
     dispatched.payload ??
     (providerSessionOnly
       ? normalizeAgentStatusPayload({ state: 'done', prompt: '', agentType: source })
+      : null) ??
+    (claudeFacts.claudeBatch &&
+    previousStatus?.payload.agentType === 'claude' &&
+    state.claudeLeadStateByPaneKey.has(paneKey)
+      ? previousStatus.payload
       : null)
   const restoredUnconfirmed =
     source === 'claude' && state.claudeUnconfirmedRestoredStatusPaneKeys.delete(paneKey)
@@ -280,13 +290,15 @@ export function normalizeHookPayload(
     grokPromptBoundary: grokActiveTurn ? true : undefined,
     compactTrigger,
     toolUseId: readFirstString(hookPayloadRecord, ['tool_use_id', 'toolUseId']),
+    ...claudeFacts,
     toolAgentId: readFirstString(hookPayloadRecord, ['agent_id', 'agentId']),
     teammateName:
       source === 'claude' && eventName === 'TeammateIdle'
         ? readString(hookPayloadRecord, 'teammate_name')
         : undefined,
     toolAgentType: readString(hookPayloadRecord, 'agent_type'),
-    ...(source === 'claude'
+    // A batch's live-work fact is read by the host that releases a request with it, never before.
+    ...(source === 'claude' && !claudeFacts.claudeBatch
       ? {
           claudeRunningNonAgentTask: claudeRowHasUnlistedLiveWork(state, paneKey)
         }
