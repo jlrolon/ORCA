@@ -7,6 +7,7 @@ import {
 import { readAgentJournalTurn } from '../../../shared/agent-session/lifecycle/agent-session-turn-record'
 import { agentJournalLinkageFields } from '../../../shared/agent-session/journal/agent-session-journal-producer'
 import { parseAgentJournalItemKey } from '../../../shared/agent-session/journal/agent-session-journal-item-key'
+import { decodeOmpRewindTarget, encodeOmpRewindTarget } from '../../../shared/omp-rewind-target'
 import type {
   AgentJournalItemBody,
   AgentJournalRenderItem
@@ -40,6 +41,40 @@ export function structuredRewindCut(
   const { providerKey, omitted, nativeIdentity } = savedRewindKeys(snapshot.submissions)
   const selected = items.find((item) => item.itemId === target.itemId)
   const key = selected ? nativeIdentity(selected.itemId) : null
+  if (selected && target.provider === 'omp') {
+    const identity = parseAgentJournalItemKey(providerKey(selected.itemId))
+    const turnItemId =
+      scopedTurn(selected) ??
+      items.find(
+        (item) =>
+          readAgentJournalTurn(journal.itemBody(item.itemId) ?? undefined)?.userItemId ===
+          selected.itemId
+      )?.itemId
+    const turn = turnItemId ? readAgentJournalTurn(journal.itemBody(turnItemId) ?? undefined) : null
+    const beforeTurnId =
+      identity?.provider === 'legacy' &&
+      identity.agent === 'omp' &&
+      identity.sessionId === target.nativeId
+        ? encodeOmpRewindTarget({ entryId: identity.recordId })
+        : turn?.providerTurnId
+    if (!beforeTurnId || !decodeOmpRewindTarget(beforeTurnId)) {
+      return null
+    }
+    const boundary = items.findIndex(
+      (item) => item.itemId === selected.itemId || item.itemId === turnItemId
+    )
+    const keptTurns = new Set(items.slice(0, boundary).flatMap((item) => scopedTurn(item) ?? []))
+    const kept = items.filter(
+      (item, index) =>
+        !omitted.has(item.itemId) &&
+        (index < boundary || (scopedTurn(item) !== undefined && keptTurns.has(scopedTurn(item)!)))
+    )
+    return {
+      beforeTurnId,
+      keptTurnId: null,
+      kept: kept.map((item) => keptRow(journal, item, providerKey))
+    }
+  }
   if (key?.provider === 'claude' && target.provider === 'claude') {
     // Messages before an earlier fork still cut at their original position.
     const boundary = items.findIndex((item) => item.itemId === target.itemId)
