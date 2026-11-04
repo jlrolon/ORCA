@@ -32,6 +32,7 @@ const WORKTREE_HANDLER_CHANNELS = [
   'worktrees:scanStartingWslDistro',
   'worktrees:create',
   'worktrees:adoptProvisionedRoot',
+  'worktrees:runApprovedSetup',
   'worktrees:prefetchCreateBase',
   'worktrees:resolvePrBase',
   'worktrees:resolveMrBase',

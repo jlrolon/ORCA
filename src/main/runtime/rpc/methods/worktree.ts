@@ -24,6 +24,7 @@ import {
   WorktreeRemove,
   WorktreeResolveMrBase,
   WorktreeResolvePrBase,
+  WorktreeRunApprovedSetup,
   WorktreeSelector,
   WorktreeSortOrder,
   WorktreeTeardownMissingTerminalsParams
@@ -34,6 +35,7 @@ import { waitsForWorktreeRemoval } from '../worktree-removal-marker-projection'
 import { queueWorkspaceDelete } from '../../workspaces/workspace-lifecycle-commands'
 import { WORKTREE_SLEEP_METHOD } from './worktree-sleep-method'
 import { WORKTREE_SET_METHOD } from './worktree-set-method'
+import { runApprovedCreatedWorktreeSetup } from '../../created-worktree-approved-setup'
 
 export const WORKTREE_METHODS = [
   ...WORKTREE_CATALOG_METHODS,
@@ -47,6 +49,15 @@ export const WORKTREE_METHODS = [
         params.worktreeIds,
         params.connectionId
       )
+  }),
+  defineMethod({
+    name: 'worktree.runApprovedSetup',
+    permission: 'workspace',
+    params: WorktreeRunApprovedSetup,
+    handler: async (params, { runtime }) =>
+      runApprovedCreatedWorktreeSetup(runtime, params.worktree, params.approvedSetupHash, {
+        wslUserAct: true
+      })
   }),
   defineMethod({
     name: 'worktree.lineageList',
