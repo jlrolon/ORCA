@@ -30,6 +30,7 @@ export function useMobileStructuredOptionState(args: {
   optionCatalog: AgentSessionOptionCatalog | null
   sessionId: string | null
   turnId: string | null
+  sessionKey?: string
 }) {
   const {
     agent,
@@ -104,7 +105,16 @@ export function useMobileStructuredOptionState(args: {
     sessionId,
     onRevalidate: reread
   })
-  const contextKey = JSON.stringify([agent, sessionId, newLaunch, worktree, fence, connected])
+  const contextKey = JSON.stringify([
+    agent,
+    sessionId,
+    args.sessionKey,
+    newLaunch,
+    worktree,
+    fence,
+    connected
+  ])
+  const goalIdentityKey = JSON.stringify([agent, sessionId, args.sessionKey, fence])
   const contextRef = useRef({ key: contextKey, client })
   useEffect(() => {
     contextRef.current = { key: contextKey, client }
@@ -132,6 +142,13 @@ export function useMobileStructuredOptionState(args: {
         : { conversationSupport: null, imageSupport: null },
     [support]
   )
+  const [goalReport, setGoalReport] = useState<{
+    contextKey: string
+    client: RpcClient
+    hostChanges: boolean
+    value: AgentSessionOptionsResult['threadGoal'] | AgentSessionOptionsResult['reportedThreadGoal']
+  } | null>(null)
+
   useEffect(
     () =>
       reader.attach({
@@ -164,6 +181,15 @@ export function useMobileStructuredOptionState(args: {
           if (sessionId) {
             forgetMobileCreatedStructuredSession(sessionId)
           }
+          const result = reader.getSnapshot().support?.result
+          if (client && result) {
+            setGoalReport({
+              contextKey: goalIdentityKey,
+              client,
+              hostChanges: result.threadGoal !== undefined,
+              value: result.threadGoal ?? result.reportedThreadGoal
+            })
+          }
         }
       }),
     [
@@ -181,7 +207,8 @@ export function useMobileStructuredOptionState(args: {
       coherentCatalog,
       providerStarting,
       sendSelection,
-      isCurrentContext
+      isCurrentContext,
+      goalIdentityKey
     ]
   )
   // A turn or host status change rereads within the same lease, as on desktop; it is not a new context.
@@ -198,6 +225,16 @@ export function useMobileStructuredOptionState(args: {
     projectRuntimeReports,
     conversationSupport,
     imageSupport,
+    threadGoalReport:
+      enabled && goalReport?.contextKey === goalIdentityKey && goalReport.client === client
+        ? goalReport.value
+        : undefined,
+    threadGoalHostChanges:
+      enabled &&
+      goalReport?.contextKey === goalIdentityKey &&
+      goalReport.client === client &&
+      goalReport.hostChanges,
+
     controller,
     reread,
     receiveCatalog,

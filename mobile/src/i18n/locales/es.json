@@ -1018,6 +1018,20 @@
     "mermaidDiagram": {
       "expand": "Ampliar diagrama",
       "label": "Diagrama de Mermaid"
+    },
+    "native-chat": {
+      "goal": {
+        "pause": "Pausar objetivo",
+        "set": "Objetivo establecido",
+        "limited": "Objetivo limitado",
+        "paused": "Objetivo en pausa",
+        "resume": "Reanudar objetivo",
+        "blocked": "Objetivo bloqueado",
+        "collapse": "Ocultar objetivo completo",
+        "expand": "Mostrar objetivo completo",
+        "clear": "Borrar objetivo",
+        "pursuing": "Objetivo en curso"
+      }
     }
   },
   "connection": {

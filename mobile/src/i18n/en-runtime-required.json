@@ -154,6 +154,17 @@
       "showChildAgents_one": "Show {{count}} child agent",
       "showChildAgents_other": "Show {{count}} child agents"
     },
+    "native-chat": {
+      "goal": {
+        "blocked": "Goal blocked",
+        "collapse": "Hide full goal",
+        "expand": "Show full goal",
+        "limited": "Goal limited",
+        "paused": "Paused goal",
+        "pursuing": "Pursuing goal",
+        "set": "Goal set"
+      }
+    },
     "worktreeListRow": {
       "children_one": "{{count}} child",
       "children_other": "{{count}} children"

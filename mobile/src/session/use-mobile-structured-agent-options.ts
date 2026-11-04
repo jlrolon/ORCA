@@ -1,3 +1,4 @@
+import { lockedStructuredAgentSessionOptionSnapshot } from '../../../src/shared/agent-session/options/structured-agent-session-option-snapshot'
 import type { AgentSessionConversationCommand } from '../../../src/shared/agent-session/agent-session-conversation-command'
 import { useMobileStructuredOptionState } from './use-mobile-structured-option-state'
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react'
@@ -22,7 +23,7 @@ import {
   createStructuredAgentSessionOptionsWriteOwner
 } from '../../../src/shared/agent-session/options/structured-agent-session-options-write-owner'
 import { useMobileStructuredOptionSurface } from './use-mobile-structured-option-surface'
-import { lockedStructuredAgentSessionOptionSnapshot } from '../../../src/shared/agent-session/options/structured-agent-session-option-snapshot'
+import { useMobileStructuredThreadGoalControls } from './use-mobile-structured-thread-goal-controls'
 
 const NO_COMMANDS: readonly AgentSessionConversationCommand[] = []
 
@@ -30,11 +31,13 @@ export function useMobileStructuredAgentOptions(args: {
   agent: string | null
   client: RpcClient | null
   sessionId: string | null
+  sessionKey?: string
   enabled: boolean
   fence: number | null
   turnId: string | null
   mutate: StructuredAgentSessionMutate
   optionStamp?: string
+  goalActions?: { enabled: boolean; onSendError: (message: string) => void }
   hostSupport: Pick<
     StructuredAgentSessionHostSupport,
     | 'permissionModes'
@@ -66,6 +69,8 @@ export function useMobileStructuredAgentOptions(args: {
     updateOptionState,
     conversationSupport,
     imageSupport,
+    threadGoalReport,
+    threadGoalHostChanges,
     receiveCatalog,
     isCurrentContext,
     controller,
@@ -80,6 +85,7 @@ export function useMobileStructuredAgentOptions(args: {
     turnId,
     client,
     optionStamp,
+    sessionKey: args.sessionKey,
     sendSelection: hostSupport?.sendSelection === true,
     newLaunch: createdHere !== undefined,
     worktree: createdHere?.worktree,
@@ -202,7 +208,20 @@ export function useMobileStructuredAgentOptions(args: {
       readOptionSnapshot
     })
 
+  const threadGoalControls = useMobileStructuredThreadGoalControls({
+    sessionKey: args.sessionKey ?? sessionId ?? '',
+    client,
+    fence,
+    enabled: args.goalActions?.enabled === true,
+    supported: threadGoalHostChanges,
+    mutate,
+    reread,
+    onSendError: args.goalActions?.onSendError ?? (() => {})
+  })
+
   return {
+    threadGoalReport,
+    threadGoalControls,
     optionPickerRequest,
     conversationCommands:
       conversationSupport?.sessionId === sessionId ? conversationSupport.commands : NO_COMMANDS,

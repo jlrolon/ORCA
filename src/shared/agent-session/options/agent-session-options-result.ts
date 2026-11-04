@@ -9,6 +9,13 @@ import type {
   AgentSessionModelOption
 } from '../agent-session-wire'
 
+export type AgentSessionThreadGoalReport = {
+  current: AgentJournalThreadGoal | null
+  contextFloor?: AgentJournalCursor
+  /** Exact goal/clear transition observed by the host; older hosts omit this. */
+  source?: AgentJournalCursor & { revision: number }
+}
+
 export type AgentSessionAcceptedInputSources = Partial<
   Record<'model' | 'effort' | 'fastMode' | 'serviceTier', 'saved' | 'seeded' | 'policy'>
 >
@@ -25,9 +32,9 @@ export type AgentSessionOptionsResult = {
   /** `/compact` takes instructions here; an older host omits this and refuses the field. */
   compactInstructions?: boolean
   /** Offer goal controls only with threadGoal support; current spans the whole journal, including unloaded pages. */
-  threadGoal?: { current: AgentJournalThreadGoal | null; contextFloor?: AgentJournalCursor }
+  threadGoal?: AgentSessionThreadGoalReport
   /** Journal goal changed only by the agent's /goal; separate from threadGoal so older clients never offer host controls. */
-  reportedThreadGoal?: { current: AgentJournalThreadGoal; contextFloor?: AgentJournalCursor }
+  reportedThreadGoal?: AgentSessionThreadGoalReport & { current: AgentJournalThreadGoal }
   /** Present for sessions writing turn context facts; current takes each part from the whole journal, including unloaded pages. */
   contextUsage?: { current: AgentSessionContextUsage; contextFloor?: AgentJournalCursor }
   /** This session takes image attachments. Absent = unknown (an older host). */

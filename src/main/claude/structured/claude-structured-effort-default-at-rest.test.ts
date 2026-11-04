@@ -1,3 +1,4 @@
+import { hostTestRestingOptionsJournal } from '../../native-chat/agent-session-wire/structured-agent-session-host-test-data'
 import { agentSessionRecordFixture } from '../../native-chat/agent-session-record-test-fixture'
 import { claudeProviderHandle } from '../../../shared/agent-session/lifecycle/agent-session-provider-handle-encoding'
 import { agentSessionConversationView } from '../../../shared/agent-session/lifecycle/agent-session-conversation-view'
@@ -207,14 +208,7 @@ async function readAtRest(store: AgentModelCatalogStore, record: AgentSessionRec
   const resting = {
     child: null,
     params: { provider: 'claude' },
-    journal: {
-      threadGoal: () => null,
-      visitItems: () => {},
-      inputOrder: { hasInputs: () => false },
-      statusRead: () => ({ items: [], submissions: [] }),
-      contextUsage: () => null,
-      context: { floor: () => null }
-    }
+    journal: hostTestRestingOptionsJournal()
   }
   // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the resting read touches only these members.
   const context = {

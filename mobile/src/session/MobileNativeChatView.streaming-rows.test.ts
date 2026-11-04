@@ -170,6 +170,7 @@ vi.mock('./native-chat/transcript/MobileNativeChatLiveLine', () => ({
 vi.mock('./MobileAgentWorkingIndicator', () => ({
   MobileAgentWorkingIndicator: 'WorkingIndicator'
 }))
+vi.mock('../components/bottom-drawer/BottomDrawer', () => ({ BottomDrawer: 'BottomDrawer' }))
 vi.mock('../components/ActionSheetModal', () => ({ ActionSheetModal: 'ActionSheetModal' }))
 vi.mock('./native-chat/input/MobileNativeChatAsk', () => ({ MobileNativeChatAsk: 'ChatAsk' }))
 vi.mock('./native-chat/input/MobileNativeChatPermission', () => ({
