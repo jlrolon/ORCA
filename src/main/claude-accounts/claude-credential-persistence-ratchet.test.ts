@@ -61,6 +61,8 @@ const fsAllowances: Record<string, readonly string[]> = {
     'rmSync',
     'writeFileSync'
   ],
+  // An endpoint account's own token and settings.json, never a Claude login.
+  'claude-accounts/claude-api-endpoint.ts': ['rmSync', 'writeSecureFile'],
   'claude-accounts/claude-profile-sharing.ts': [
     'mkdirSync',
     'rmdirSync',

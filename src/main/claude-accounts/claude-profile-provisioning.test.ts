@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type * as FsUtils from '../codex-accounts/fs-utils'
+import type * as SecureFile from '../../shared/secure-file'
+const secureFile = vi.hoisted(() => ({ canProtect: true }))
 vi.mock('electron', () => ({ app: { getPath: () => '/unused-test-path' } }))
 vi.mock('node:fs', async (original) => {
   const actual = await original<typeof fs>()
@@ -11,6 +13,14 @@ vi.mock('node:fs', async (original) => {
 vi.mock('../codex-accounts/fs-utils', async (original) => {
   const actual = await original<typeof FsUtils>()
   return { ...actual, writeFileAtomically: vi.fn(actual.writeFileAtomically) }
+})
+vi.mock('../../shared/secure-file', async (original) => {
+  const actual = await original<typeof SecureFile>()
+  return {
+    ...actual,
+    writeSecureFile: (...args: Parameters<typeof actual.writeSecureFile>) =>
+      actual.writeSecureFile(...args) && secureFile.canProtect
+  }
 })
 import { writeFileAtomically } from '../codex-accounts/fs-utils'
 import { provisionClaudeProfile } from './claude-profile-provisioning'
@@ -37,6 +47,7 @@ function fixture() {
 const provision = (f: { profileHome: string; userHome: string }) =>
   provisionClaudeProfile({ profileHome: f.profileHome, userHome: f.userHome, platform: 'linux' })
 afterEach(() => {
+  secureFile.canProtect = true
   vi.clearAllMocks()
   for (const dir of roots.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true })
@@ -167,6 +178,76 @@ describe('Claude profile refresh from the default home', () => {
       expect(f.read(elsewhere)).toEqual({ mine: true })
     }
   )
+  it('leaves no endpoint settings behind when they cannot be protected', async () => {
+    const f = fixture()
+    secureFile.canProtect = false
+    const report = await provisionClaudeProfile({
+      profileHome: f.profileHome,
+      userHome: f.userHome,
+      platform: 'linux',
+      endpointEnv: { ANTHROPIC_AUTH_TOKEN: 'endpoint-token' }
+    })
+    expect(report.surfaces['settings.json']).toBe('failed')
+    expect(fs.existsSync(join(f.profileHome, 'settings.json'))).toBe(false)
+  })
+  it('drops the endpoint settings once the folder no longer has an endpoint', async () => {
+    const f = fixture()
+    await provisionClaudeProfile({
+      profileHome: f.profileHome,
+      userHome: f.userHome,
+      platform: 'linux',
+      endpointEnv: { ANTHROPIC_AUTH_TOKEN: 'endpoint-token' }
+    })
+    expect(fs.existsSync(join(f.profileHome, 'settings.json'))).toBe(true)
+    await provision(f)
+    expect(fs.existsSync(join(f.profileHome, 'settings.json'))).toBe(false)
+  })
+  it('adds an endpoint account’s env over the user’s settings and drops other credentials', async () => {
+    const f = fixture()
+    f.json(join(f.source, 'settings.json'), {
+      model: 'a',
+      apiKeyHelper: 'helper',
+      env: {
+        ANTHROPIC_BASE_URL: 'https://proxy.example.test',
+        ANTHROPIC_API_KEY: 'proxy-key',
+        CLAUDE_CODE_USE_BEDROCK: '1',
+        NORMAL: 'yes'
+      }
+    })
+    const endpointEnv = {
+      ANTHROPIC_BASE_URL: 'https://api.example.test',
+      ANTHROPIC_AUTH_TOKEN: 'endpoint-token'
+    }
+    const run = () =>
+      provisionClaudeProfile({
+        profileHome: f.profileHome,
+        userHome: f.userHome,
+        platform: 'linux',
+        endpointEnv
+      })
+    expect((await run()).surfaces['settings.json']).toBe('synced')
+    const target = join(f.profileHome, 'settings.json')
+    const env = f.read(target).env as Record<string, string>
+    expect(f.read(target).model).toBe('a')
+    expect(f.read(target).apiKeyHelper).toBeUndefined()
+    // Cleared, not omitted, so the same names exported by a shell cannot apply either.
+    expect(env).toMatchObject({
+      NORMAL: 'yes',
+      ...endpointEnv,
+      ANTHROPIC_API_KEY: '',
+      ANTHROPIC_CUSTOM_HEADERS: '',
+      CLAUDE_CODE_USE_BEDROCK: '0',
+      CLAUDE_CODE_USE_ANTHROPIC_AWS: '0'
+    })
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(target).mode & 0o777).toBe(0o600)
+    }
+    expect((await run()).surfaces['settings.json']).toBe('unchanged')
+    fs.rmSync(join(f.source, 'settings.json'))
+    expect((await run()).surfaces['settings.json']).toBe('synced')
+    expect(Object.keys(f.read(target))).toEqual(['env'])
+    expect(f.read(target).env).toMatchObject(endpointEnv)
+  })
   it('copies state except the login, caches and install ids, and never copies credentials', async () => {
     const f = fixture()
     fs.writeFileSync(join(f.source, '.credentials.json'), 'SOURCE_CREDENTIAL_BYTES')
