@@ -1,7 +1,12 @@
 // @vitest-environment happy-dom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import '@/constants/terminal'
+import {
+  BACKGROUND_MOUNT_TERMINAL_WORKTREE_EVENT,
+  WAKE_HIBERNATED_AGENTS_WORKTREE_EVENT,
+  type BackgroundMountTerminalWorktreeDetail,
+  type WakeHibernatedAgentsWorktreeDetail
+} from '@/constants/terminal'
 import { listenForHibernatedAgentWake } from '@/components/terminal-pane/hibernated-agent-wake-listener'
 import type { ResumeSleepingAgentSessionsOptions } from './resume-sleeping-agent-session'
 import type { SleepingAgentSessionRecord } from '../../../shared/agent-session/lifecycle/agent-session-resume'
@@ -30,7 +35,19 @@ vi.mock('./sleeping-agent-pane-ownership', () => ({
     `${record.worktreeId}\0${record.agent ?? 'agent'}\0${record.providerSession?.key ?? 'session_id'}\0${record.providerSession?.id ?? 'session'}`
 }))
 
-let sleepingRecords: Record<string, { worktreeId: string; paneKey: string; tabId?: string }> = {}
+let sleepingRecords: Record<
+  string,
+  {
+    worktreeId: string
+    paneKey: string
+    tabId?: string
+    restoreOnTabOpenOnly?: boolean
+    agent?: string
+    capturedAt?: number
+    updatedAt?: number
+    providerSession?: { key?: string; id?: string }
+  }
+> = {}
 let terminalTabsByWorktree: Record<string, { id: string }[]> = {}
 const clearSleepingAgentSessionsByPaneKey = vi.fn((paneKeys: readonly string[]) => {
   for (const paneKey of paneKeys) {
@@ -51,7 +68,44 @@ import {
   createBackgroundSleepingAgentWakeDispatcher,
   wakeSleepingAgentsForWorktreeInBackground
 } from './wake-sleeping-agents-in-background'
-import { takeSleepingAgentWakeRequest } from './sleeping-agent-wake-requests'
+import {
+  hasSleepingAgentWakeRequest,
+  takeSleepingAgentWakeRequest
+} from './sleeping-agent-wake-requests'
+
+type RecordedEvents = {
+  events: string[]
+  mountDetails: BackgroundMountTerminalWorktreeDetail[]
+  wakeDetails: WakeHibernatedAgentsWorktreeDetail[]
+  stop: () => void
+}
+
+function recordEvents(): RecordedEvents {
+  const events: string[] = []
+  const mountDetails: BackgroundMountTerminalWorktreeDetail[] = []
+  const wakeDetails: WakeHibernatedAgentsWorktreeDetail[] = []
+  const onWake = (event: Event): void => {
+    const detail = (event as CustomEvent<WakeHibernatedAgentsWorktreeDetail>).detail
+    events.push(`wake:${detail.worktreeId}`)
+    wakeDetails.push(detail)
+  }
+  const onMount = (event: Event): void => {
+    const detail = (event as CustomEvent<BackgroundMountTerminalWorktreeDetail>).detail
+    events.push(`mount:${detail.worktreeId}`)
+    mountDetails.push(detail)
+  }
+  window.addEventListener(WAKE_HIBERNATED_AGENTS_WORKTREE_EVENT, onWake)
+  window.addEventListener(BACKGROUND_MOUNT_TERMINAL_WORKTREE_EVENT, onMount)
+  return {
+    events,
+    mountDetails,
+    wakeDetails,
+    stop: () => {
+      window.removeEventListener(WAKE_HIBERNATED_AGENTS_WORKTREE_EVENT, onWake)
+      window.removeEventListener(BACKGROUND_MOUNT_TERMINAL_WORKTREE_EVENT, onMount)
+    }
+  }
+}
 
 beforeEach(() => {
   sleepingRecords = {}
@@ -122,6 +176,70 @@ describe('wakeSleepingAgentsForWorktreeInBackground', () => {
     expect(takeSleepingAgentWakeRequest(passive)).toBe(true)
     expect(takeSleepingAgentWakeRequest(passive)).toBe(false)
     expect(takeSleepingAgentWakeRequest(slept)).toBe(false)
+  })
+
+  it('background-mounts a non-passive record’s own tab so it resumes in place, not in a duplicate tab', () => {
+    sleepingRecords = { k1: { worktreeId: 'wt-1', paneKey: 'tab-a:leaf-1', tabId: 'tab-a' } }
+    terminalTabsByWorktree = { 'wt-1': [{ id: 'tab-a' }] }
+    isPassiveSpy.mockReturnValue(false)
+    const rec = recordEvents()
+
+    wakeSleepingAgentsForWorktreeInBackground('wt-1')
+
+    rec.stop()
+    // The pane's own tab is mounted so its pane cold-restores the record; the wake-on-mount mark
+    // tells the resume sweep the pane owns its record, so no duplicate tab launches per open.
+    expect(rec.events).toEqual(['wake:wt-1', 'mount:wt-1'])
+    expect(rec.mountDetails[0]?.tabIds).toEqual(['tab-a'])
+    expect(hasSleepingAgentWakeRequest(sleepingRecords.k1)).toBe(true)
+  })
+
+  it('does not wake-mark an explicit-sleep record sharing a tab with a targeted record', () => {
+    sleepingRecords = {
+      k1: { worktreeId: 'wt-1', paneKey: 'tab-a:leaf-1', tabId: 'tab-a' },
+      k2: {
+        worktreeId: 'wt-1',
+        paneKey: 'tab-a:leaf-2',
+        tabId: 'tab-a',
+        restoreOnTabOpenOnly: true
+      }
+    }
+    terminalTabsByWorktree = { 'wt-1': [{ id: 'tab-a' }] }
+    isPassiveSpy.mockReturnValue(false)
+    const rec = recordEvents()
+
+    wakeSleepingAgentsForWorktreeInBackground('wt-1')
+
+    rec.stop()
+    expect(hasSleepingAgentWakeRequest(sleepingRecords.k1)).toBe(true)
+    // Explicit sleep (#11598) stays asleep until its own tab opens, even when a sibling pane in the
+    // same tab is targeted.
+    expect(hasSleepingAgentWakeRequest(sleepingRecords.k2)).toBe(false)
+  })
+
+  it('wake-marks targeted records even when a passive record forces a whole-worktree mount', () => {
+    sleepingRecords = {
+      // No tabId, distinct provider session: an untargetable passive record that cannot be
+      // canonicalized away behind k1's claim, forcing the whole-worktree mount path.
+      kPassive: {
+        worktreeId: 'wt-1',
+        paneKey: 'tab-x:leaf-9',
+        agent: 'codex',
+        providerSession: { key: 'session_id', id: 'passive-1' }
+      },
+      k1: { worktreeId: 'wt-1', paneKey: 'tab-a:leaf-1', tabId: 'tab-a' }
+    }
+    terminalTabsByWorktree = { 'wt-1': [{ id: 'tab-a' }] }
+    isPassiveSpy.mockImplementation((record: { paneKey: string }) => record.paneKey.includes('x'))
+    const rec = recordEvents()
+
+    wakeSleepingAgentsForWorktreeInBackground('wt-1')
+
+    rec.stop()
+    // The whole-worktree mount carries no tab IDs, so its dispatch marks nothing; the targeted
+    // records must still be wake-marked or the sweep forks duplicates for them.
+    expect(rec.mountDetails[0]?.tabIds).toBeUndefined()
+    expect(hasSleepingAgentWakeRequest(sleepingRecords.k1)).toBe(true)
   })
 
   it('wakes mounted panes through the real pane listener and skips their claims', () => {
