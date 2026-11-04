@@ -1,6 +1,8 @@
 import { toast } from 'sonner'
 import { translate } from '@/i18n/i18n'
 import { extractIpcErrorMessage } from '@/lib/ipc-error'
+import { getConnectionIdFromState } from '@/lib/connection-owner-resolution'
+import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../../../shared/constants'
 import {
   assertEditorFileOperationCurrent,
   captureEditorFileOperationProvenance,
@@ -76,13 +78,44 @@ export async function createUntitledFileInActiveWorkspace(
   }
 }
 
-/** Creates `untitled<extension>` at the active workspace root, seeded with `readContent`. */
-function openSeededUntitledFile(
+/** Creates a seeded untitled file in the target group's workspace. */
+async function openSeededUntitledFile(
   get: EditorGet,
   extension: string,
   readContent: () => Promise<string>,
   groupId?: string
 ): Promise<boolean> {
+  const floatingGroup =
+    groupId === FLOATING_TERMINAL_WORKTREE_ID ||
+    (groupId
+      ? get().groupsByWorktree[FLOATING_TERMINAL_WORKTREE_ID]?.some((group) => group.id === groupId)
+      : false)
+  if (floatingGroup) {
+    try {
+      const directory = await window.api.app.getFloatingMarkdownDirectory()
+      const fileInfo = await createUntitledMarkdownFile(
+        directory,
+        FLOATING_TERMINAL_WORKTREE_ID,
+        getConnectionIdFromState(get(), FLOATING_TERMINAL_WORKTREE_ID) ?? undefined,
+        { kind: 'local' },
+        { newFile: { extension, content: await readContent() } }
+      )
+      get().openFile(fileInfo, {
+        preview: false,
+        targetGroupId: groupId === FLOATING_TERMINAL_WORKTREE_ID ? undefined : groupId,
+        suppressActiveRuntimeFallback: true
+      })
+      return true
+    } catch (error) {
+      toast.error(
+        extractIpcErrorMessage(
+          error,
+          translate('auto.store.pluginNewFile.failed', "Couldn't create the file.")
+        )
+      )
+      return false
+    }
+  }
   return createUntitledFileInActiveWorkspace(
     get,
     groupId,
