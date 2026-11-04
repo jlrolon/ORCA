@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Terminal as HeadlessTerminal } from '@xterm/headless'
 import type { Terminal } from '@xterm/xterm'
-import { captureScrollState, restoreScrollState } from './pane-scroll'
+import { captureScrollState, restoreScrollState, restoreScrollStateAfterFit } from './pane-scroll'
+import type { ScrollState } from './pane-manager-types'
 
 function writeHeadless(terminal: HeadlessTerminal, data: string): Promise<void> {
   return new Promise((resolve) => terminal.write(data, resolve))
@@ -22,6 +23,57 @@ function makeHeadlessRestorable(terminal: HeadlessTerminal): Terminal {
 }
 
 describe('scroll state', () => {
+  it('retries a fit restore when xterm silently clamps the first scroll', () => {
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.push(callback)
+      return frames.length
+    })
+    const buffer = { type: 'normal', viewportY: 10, baseY: 100 }
+    const marker = {
+      line: 42,
+      isDisposed: false,
+      dispose() {
+        this.isDisposed = true
+      }
+    }
+    const scrollToLine = vi
+      .fn((line: number) => {
+        buffer.viewportY = line
+      })
+      .mockImplementationOnce(() => {})
+    const terminal = {
+      element: {},
+      buffer: { active: buffer },
+      scrollToLine,
+      scrollLines: (delta: number) => {
+        buffer.viewportY += delta
+      }
+    } as unknown as Terminal
+    const state = {
+      bufferType: 'normal',
+      wasAtBottom: false,
+      viewportY: 42,
+      baseY: 100,
+      firstVisibleLineMarker: marker
+    } as unknown as ScrollState
+    const onRestored = vi.fn()
+
+    try {
+      restoreScrollStateAfterFit(terminal, state, { onRestored, shouldRestore: () => true })
+      expect(buffer.viewportY).toBe(10)
+      expect(marker.isDisposed).toBe(false)
+      expect(onRestored).not.toHaveBeenCalled()
+      expect(frames).toHaveLength(1)
+      frames.shift()?.(0)
+      expect(buffer.viewportY).toBe(42)
+      expect(marker.isDisposed).toBe(true)
+      expect(onRestored).toHaveBeenCalledOnce()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it.each([
     {
       fromCols: 10,
