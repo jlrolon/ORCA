@@ -1,3 +1,5 @@
+import { getRepoHostIdentity } from '../../../../../../shared/repo-host-identity'
+import type { Repo } from '../../../../../../shared/repo-types'
 import React from 'react'
 import type { VirtualItem } from '@tanstack/react-virtual'
 import { cn } from '@/lib/utils'
@@ -41,6 +43,7 @@ export type WorktreeVirtualRowContext = {
   measureVirtualRowElement: (element: HTMLDivElement | null) => void
   groupBy: WorktreeGroupBy
   workspaceStatuses: readonly WorkspaceStatusDefinition[]
+  workspaceStatusById?: ReadonlyMap<string, WorkspaceStatusDefinition>
   activeWorktreeId: string | null
   worktreeDragState: WorktreeRowDragState
   orderedHostIds: readonly string[]
@@ -51,12 +54,12 @@ export type WorktreeVirtualRowContext = {
   folderWorkspace: FolderWorkspaceRowContext
   importedWorktreeCardActionState: ReadonlyMap<string, ImportedWorktreeCardActionState>
   newExternalWorktreeInboxActionState: ReadonlyMap<string, NewExternalWorktreesInboxActionState>
-  onShowImportedWorktrees: (projectId: string) => void
-  onKeepImportedWorktreesHidden: (projectId: string) => void
+  onShowImportedWorktrees: (repo: Repo) => void
+  onKeepImportedWorktreesHidden: (repo: Repo) => void
   onOpenWorktreeVisibility: (
     repo: Parameters<SectionHeaderRowContext['projectActions']['onOpenWorktreeVisibility']>[0]
   ) => void
-  onOpenSuppressExternalWorktreeInbox: (projectId: string) => void
+  onOpenSuppressExternalWorktreeInbox: (repo: Repo) => void
   onWorkspaceStatusDragOver: (event: React.DragEvent, status: WorkspaceStatus) => void
   onWorkspaceStatusDragLeave: (event: React.DragEvent) => void
   onWorkspaceStatusDrop: (event: React.DragEvent, status: WorkspaceStatus) => void
@@ -185,7 +188,7 @@ export function renderWorktreeVirtualRow(
       row,
       vItem,
       measureVirtualRowElement: ctx.measureVirtualRowElement,
-      actionState: ctx.importedWorktreeCardActionState.get(row.repo.id),
+      actionState: ctx.importedWorktreeCardActionState.get(getRepoHostIdentity(row.repo)),
       onShow: ctx.onShowImportedWorktrees,
       onKeepHidden: ctx.onKeepImportedWorktreesHidden
     })
@@ -196,7 +199,7 @@ export function renderWorktreeVirtualRow(
       row,
       vItem,
       measureVirtualRowElement: ctx.measureVirtualRowElement,
-      actionState: ctx.newExternalWorktreeInboxActionState.get(row.repo.id),
+      actionState: ctx.newExternalWorktreeInboxActionState.get(getRepoHostIdentity(row.repo)),
       onReview: ctx.onOpenWorktreeVisibility,
       onSuppress: ctx.onOpenSuppressExternalWorktreeInbox
     })
@@ -221,7 +224,7 @@ export function renderWorktreeVirtualRow(
 
   const itemWorkspaceStatus =
     ctx.groupBy === 'workspace-status'
-      ? getWorkspaceStatus(row.worktree, ctx.workspaceStatuses)
+      ? getWorkspaceStatus(row.worktree, ctx.workspaceStatuses, ctx.workspaceStatusById)
       : null
   const itemKey = getWorktreeHostIdentity(row.worktree)
   const itemPreviewOffset = ctx.worktreeDragState.previewOffsetsByWorktreeId.get(itemKey) ?? 0

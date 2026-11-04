@@ -46,6 +46,7 @@ const worktreeMap = new Map([
 ])
 
 const grouping = {
+  settings: { projectGroupingMode: 'folder' as const },
   projects: [project],
   projectHostSetups: [repo, childRepo].map((checkout) => ({
     ...projectHostSetups[0]!,
@@ -123,7 +124,7 @@ describe('cross-project sidebar lineage', () => {
         }
       }
       const worktrees = [grandchild, child, pinnedParent]
-      const parentSection = `project:${project.id}::setup:${repo.id}`
+      const parentSection = `project:${project.id}::host:local::local::default::setup:${repo.id}`
       const plan = buildSidebarRowPlan(
         'repo',
         worktrees,

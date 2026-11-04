@@ -123,6 +123,7 @@ export function registerRepoSourceExtentTests(rpc: ReturnType<typeof vi.fn>) {
           null,
           React.createElement(RepositorySourceControlAiActionRows, {
             repoId: TEST_REPO.id,
+            repo: TEST_REPO,
             repoAi: own,
             source,
             defaultTuiAgent: 'claude',

@@ -1,6 +1,6 @@
+import { registerRepositoryStagedSetupTest } from './repository-staged-setup.test-fixture'
 import { registerRepoSourceExtentTests } from './repository-source-extent.test-fixture'
 import {
-  type SourceControlAiRepoUpdate,
   saveSourceControlActionRecipe,
   toSourceControlAiRepoUpdate
 } from '../../../../../../shared/source-control/ai/settings/source-control-ai-recipe-save'
@@ -8,12 +8,17 @@ import {
 import { EVERY_AGENT_CHAT } from '../../../../../../shared/native-chat/every-agent-chat.test-fixture'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, render, cleanup, fireEvent, screen, within, waitFor } from '@testing-library/react'
-import { pickerLocaleFixture } from '../../__fixtures__/settings-persistence-test-fixture'
 import React from 'react'
+import * as agentRoute from '@/lib/agent-launch-route-input'
+import * as agentInventory from '@/lib/agent-detection-target-inventory'
+import type { Repo } from '../../../../../../shared/repo-types'
 import type { TuiAgent } from '../../../../../../shared/agent-launch/catalog/tui-agent'
 import { createRepoActionTextDraftEditors } from './repository-source-control-ai-text-draft'
 import type { RepoSourceControlAiOverrides } from '../../../../../../shared/source-control/ai/settings/source-control-ai-settings-types'
-import { setSourceControlActionAgentDefault } from '../../../../../../shared/source-control/ai/recipes/source-control-ai-actions'
+import {
+  setSourceControlActionAgentDefault,
+  SOURCE_CONTROL_LAUNCH_ACTION_IDS
+} from '../../../../../../shared/source-control/ai/recipes/source-control-ai-actions'
 import {
   computeActionDirtyById,
   withRepoAiActionMode,
@@ -24,7 +29,6 @@ import { resolveSourceControlActionRecipe } from '../../../../../../shared/sourc
 
 import { sourceControlActionRecipeMatchesTarget } from '../../../right-sidebar/source-control/ai/source-control-action-recipe-match'
 import { SourceControlActionAgentPicker } from '../../source-control/SourceControlActionAgentPicker'
-import { RepositorySourceControlAiSection } from './RepositorySourceControlAiSection'
 import { RepositorySourceControlAiActionRows } from './RepositorySourceControlAiActionRows'
 import { SourceControlAiActionRecipeDefaults } from '../../source-control/SourceControlAiActionRecipeDefaults'
 import { useAppStore } from '../../../../store/index'
@@ -170,6 +174,7 @@ describe('RepositorySourceControlAiActionRows', () => {
           }),
           React.createElement(RepositorySourceControlAiActionRows, {
             repoId: 'repo-1',
+            repo: useAppStore.getState().repos[0],
             repoAi: { actionOverrides: { fixCommitFailure: recipe } },
             source,
             defaultTuiAgent: 'claude',
@@ -312,6 +317,7 @@ it.each(['own', 'parent'] as const)(
         null,
         React.createElement(RepositorySourceControlAiActionRows, {
           repoId: TEST_REPO.id,
+          repo: TEST_REPO,
           repoAi,
           source,
           defaultTuiAgent: 'claude',
@@ -480,6 +486,7 @@ it.each([1, 10])(
     const edit = vi.fn()
     const props = {
       repoId: TEST_REPO.id,
+      repo: useAppStore.getState().repos[0],
       repoAi: { actionOverrides: actions },
       source: settings.sourceControlAi!,
       defaultTuiAgent: 'claude' as const,
@@ -559,104 +566,235 @@ it.each([1, 10])(
   }
 )
 
-registerRepoSourceExtentTests(rpc)
-
-it('keeps staged repository setup through template edits and saves/reopens only current own fields', async () => {
-  const locale = await pickerLocaleFixture()
-  const menu = await import('../../../tab-bar/use-new-tab-agent-menu-rows')
-  const { sameAgentLaunchPickerModel } = await import('../../../tab-bar/new-tab-agent-menu-model')
-  const observation = vi.spyOn(menu, 'useAgentMenuObservation')
-  try {
-    useAppStore.setState(({ settings }) => ({
-      settings: settings && { ...settings, nativeChatProviders: {} },
-      detectedAgentIds: ['claude'],
-      localDetectedAgentIdsByContext: { host: ['claude'] }
-    }))
-    const repo = {
-      ...TEST_REPO,
-      sourceControlAi: {
-        actionOverrides: {
-          fixChecks: {
-            agentId: 'claude' as const,
-            agentArgs: '--saved',
-            commandInputTemplate: 'Old repo'
+it.each(['ssh', 'runtime'] as const)(
+  'measures corrected %s twin selectors separately from real action-row renders and disposes their existing request',
+  async (kind) => {
+    const settings = useAppStore.getState().settings!
+    const local: Repo = { ...TEST_REPO, executionHostId: 'local' }
+    const exact: Repo =
+      kind === 'ssh'
+        ? { ...local, path: '/box/repo', connectionId: 'box', executionHostId: 'ssh:box' }
+        : { ...local, path: '/alpha/repo', executionHostId: 'runtime:alpha' }
+    const ownKey = kind === 'ssh' ? 'box' : getRuntimeAgentInventoryKey('alpha')
+    const otherKey = kind === 'ssh' ? 'other' : getRuntimeAgentInventoryKey('other')
+    let ownIds: TuiAgent[] = ['claude']
+    let ownReads = 0
+    let foreignReads = 0
+    const inventory = () =>
+      Object.defineProperties(
+        {},
+        {
+          [ownKey]: {
+            enumerable: true,
+            configurable: true,
+            get: () => {
+              ownReads++
+              return ownIds
+            }
+          },
+          [otherKey]: {
+            enumerable: true,
+            configurable: true,
+            get: () => {
+              foreignReads++
+              return ['goose']
+            }
           }
         }
-      }
-    }
-    useAppStore.setState({ repos: [repo] })
-    const update = vi.fn<(id: string, updates: SourceControlAiRepoUpdate) => Promise<boolean>>(
-      async () => true
-    )
+      )
+    const remoteRefresh = vi.fn().mockResolvedValue(['claude'])
+    const runtimeRefresh = vi.fn().mockResolvedValue(['claude'])
+    const host = projectAgentLaunchSettings({ defaultTuiAgent: 'codex' })
+    rpc.mockClear()
+    rpc.mockResolvedValue({ settings: host })
+    useAppStore.setState({
+      settings: { ...settings, nativeChatProviders: {}, defaultTuiAgent: 'codex' },
+      repos: [local, exact],
+      settingsSearchQuery: '',
+      detectedAgentIds: ['goose'],
+      remoteDetectedAgentIds: kind === 'ssh' ? inventory() : {},
+      runtimeDetectedAgentIds: kind === 'runtime' ? inventory() : {},
+      ensureNativeDetectedAgents: vi.fn(),
+      ensureRemoteDetectedAgents: vi.fn(),
+      ensureRuntimeDetectedAgents: vi.fn(),
+      refreshRemoteDetectedAgents: remoteRefresh,
+      refreshRuntimeDetectedAgents: runtimeRefresh
+    })
+    const route = vi.spyOn(agentRoute, 'buildAgentLaunchRouteInput')
+    const storedInventory = vi.spyOn(agentInventory, 'readDetectedAgentsForTarget')
+    const edit = vi.fn()
+    let commits = 0
     const view = render(
-      React.createElement(RepositorySourceControlAiSection, { repo, updateRepo: update }),
-      { wrapper: TooltipProvider }
-    )
-    const card = screen.getByText('Broken checks fixes').closest('[data-settings-section]')!
-    if (!(card instanceof HTMLElement)) {
-      throw new Error('Missing repository card')
-    }
-    const own = within(card)
-    const open = async () => {
-      const trigger = own.getByRole('button', { name: 'Select agent' })
-      await waitFor(() => expect(trigger).toHaveProperty('disabled', false))
-      fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
-      fireEvent.click(await screen.findByRole('button', { name: 'Configure Claude' }))
-    }
-    await open()
-    fireEvent.change(screen.getByRole('textbox', { name: 'Arguments' }), {
-      target: { value: '--model claude-sonnet-5-5 --accepted' }
-    })
-    fireEvent.blur(screen.getByRole('textbox', { name: 'Arguments' }))
-    fireEvent.change(screen.getByRole('textbox', { name: 'Arguments' }), {
-      target: { value: '--pending' }
-    })
-    const input = screen.getByRole('textbox', { name: 'Arguments' })
-    const model = observation.mock.results.at(-1)?.value.model
-    expect(model).toBeDefined()
-    for (const host of [null, ['codex'], ['claude']] as const) {
-      act(() =>
-        useAppStore.setState({ localDetectedAgentIdsByContext: { host: host && [...host] } })
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(
+          React.Profiler,
+          {
+            id: 'actual-action-rows',
+            onRender: () => {
+              commits++
+            }
+          },
+          React.createElement(RepositorySourceControlAiActionRows, {
+            repoId: exact.id,
+            repo: exact,
+            repoAi: {},
+            source: settings.sourceControlAi!,
+            defaultTuiAgent: 'codex',
+            savingActionIds: {},
+            actionDirtyById: computeActionDirtyById({}, {}, {}),
+            onActionModeChange: edit,
+            onActionAgentChange: edit,
+            onActionLaunchPreferencesChange: edit,
+            onActionTemplateChange: edit,
+            onActionAgentArgsChange: edit,
+            onAppendVariable: edit,
+            onActionDiscard: edit,
+            onActionSave: edit
+          })
+        )
       )
-      expect(sameAgentLaunchPickerModel(model!, observation.mock.results.at(-1)!.value.model)).toBe(
-        true
-      )
-      expect(screen.getByRole('textbox', { name: 'Arguments' })).toBe(input)
-      expect(input).toHaveProperty('value', '--pending')
-      expect(screen.getByRole('button', { name: 'Remove --model claude-sonnet-5-5' })).toBeDefined()
-      expect(update).not.toHaveBeenCalled()
-    }
-    await act(() => locale.i18n.changeLanguage('es'))
-    expect(screen.getByRole('textbox', { name: 'Argumentos' })).toBe(input)
-    expect(input).toHaveProperty('value', '--pending')
-    expect(screen.getByRole('button', { name: 'Iniciar terminal' })).toBeDefined()
-    expect(update).not.toHaveBeenCalled()
-    await act(() => locale.i18n.changeLanguage('en'))
-    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Arguments' }), { key: 'Escape' })
-    fireEvent.keyDown(document, { key: 'Escape' })
-    fireEvent.change(own.getByDisplayValue('Old repo'), {
-      target: { value: 'CURRENT {basePrompt}' }
-    })
-    await open()
-    expect(screen.getByRole('textbox', { name: 'Arguments' })).toHaveProperty('value', '--pending')
-    expect(screen.getByRole('button', { name: 'Remove --model claude-sonnet-5-5' })).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: 'Launch terminal' }))
-    expect(own.getByDisplayValue('CURRENT {basePrompt}')).toBeDefined()
-    fireEvent.click(own.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(update).toHaveBeenCalledOnce())
-    const saved = update.mock.calls[0]![1].sourceControlAi!
-    expect(saved.actionOverrides!.fixChecks!.commandInputTemplate).toBe('CURRENT {basePrompt}')
-    expect(saved.actionOverrides!.fixChecks!.agentArgs).toBe('--pending')
-    view.unmount()
-    render(
-      React.createElement(RepositorySourceControlAiSection, {
-        repo: { ...repo, sourceControlAi: saved },
-        updateRepo: update
-      }),
-      { wrapper: TooltipProvider }
     )
-    expect(screen.getByDisplayValue('CURRENT {basePrompt}')).toBeDefined()
-  } finally {
-    await locale.restore()
+    try {
+      await act(async () => {})
+      const assertHostChoices = async (agent: string, absent: string) => {
+        const triggers = view
+          .getAllByRole('button', { name: 'Select agent' })
+          .filter((button) =>
+            SOURCE_CONTROL_LAUNCH_ACTION_IDS.some((id) =>
+              button.closest('[data-settings-section]')?.id.endsWith(id)
+            )
+          )
+        expect(triggers).toHaveLength(5)
+        fireEvent.pointerDown(triggers[0], { button: 0, ctrlKey: false })
+        expect(
+          screen.getAllByRole('menuitem').some((row) => row.textContent?.includes(agent))
+        ).toBe(true)
+        expect(
+          screen.getAllByRole('menuitem').some((row) => row.textContent?.includes(absent))
+        ).toBe(false)
+        fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+        await act(async () => {})
+      }
+      expect(view.getAllByRole('button', { name: 'Select agent' })).toHaveLength(8)
+      expect(kind === 'ssh' ? remoteRefresh : runtimeRefresh).toHaveBeenCalledWith(
+        kind === 'ssh' ? 'box' : 'alpha',
+        ...(kind === 'runtime' ? [undefined] : [])
+      )
+      expect(kind === 'ssh' ? runtimeRefresh : remoteRefresh).not.toHaveBeenCalled()
+      const expectedTarget =
+        kind === 'ssh'
+          ? { kind: 'ssh', connectionId: 'box' }
+          : { kind: 'runtime', environmentId: 'alpha' }
+      expect(storedInventory.mock.calls.length).toBeGreaterThan(0)
+      expect(
+        storedInventory.mock.calls.every(
+          ([, target]) => JSON.stringify(target) === JSON.stringify(expectedTarget)
+        )
+      ).toBe(true)
+      const repositoryRoutes = () =>
+        route.mock.calls.filter(([, args]) => args.workspace.repoId === exact.id)
+      expect(repositoryRoutes().length).toBeGreaterThan(0)
+      expect(
+        repositoryRoutes().every(
+          ([, args]) => args.workspace.executionHostId === exact.executionHostId
+        )
+      ).toBe(true)
+      const gets = () => rpc.mock.calls.filter((call) => call[1] === 'settings.getAgentLaunch')
+      expect(gets()).toHaveLength(kind === 'runtime' ? 1 : 0)
+      async function measure(label: string, publish: () => void) {
+        commits = ownReads = foreignReads = 0
+        route.mockClear()
+        storedInventory.mockClear()
+        await act(async () => publish())
+        const record = {
+          kind,
+          act: label,
+          commits,
+          ownInventoryReads: ownReads,
+          foreignInventoryReads: foreignReads,
+          storedInventoryReads: storedInventory.mock.calls.length,
+          routePreparations: repositoryRoutes().length,
+          hostRequests: gets().length
+        }
+        console.log('PG9 nested action selectors', JSON.stringify(record))
+        expect(record.ownInventoryReads).toBeGreaterThan(0)
+        expect(record.storedInventoryReads).toBeGreaterThan(0)
+        expect(record.routePreparations).toBeGreaterThan(0)
+        expect(record.foreignInventoryReads).toBe(0)
+        expect(
+          repositoryRoutes().every(
+            ([, args]) => args.workspace.executionHostId === exact.executionHostId
+          )
+        ).toBe(true)
+        expect(gets()).toHaveLength(kind === 'runtime' ? 1 : 0)
+        return record
+      }
+      const unrelated = await measure('unrelated', () =>
+        useAppStore.setState({ settingsSearchInputQuery: 'unrelated notification' })
+      )
+      expect(unrelated.commits).toBe(0)
+      const font = await measure('font', () =>
+        useAppStore.setState(({ settings }) => ({
+          settings: settings && { ...settings, appFontFamily: 'monospace' }
+        }))
+      )
+      expect(font.commits).toBe(0)
+      const otherHost = await measure('other-host', () =>
+        useAppStore.setState(
+          kind === 'ssh'
+            ? {
+                remoteDetectedAgentIds: Object.defineProperty(inventory(), otherKey, {
+                  enumerable: true,
+                  configurable: true,
+                  value: ['codex']
+                })
+              }
+            : {
+                runtimeDetectedAgentIds: Object.defineProperty(inventory(), otherKey, {
+                  enumerable: true,
+                  configurable: true,
+                  value: ['codex']
+                })
+              }
+        )
+      )
+      expect(otherHost.commits).toBe(0)
+      const equalOverride = await measure('equal-override', () =>
+        useAppStore.setState(({ settings }) => ({
+          settings: settings && {
+            ...settings,
+            projectGroupingOverrides: { ...settings.projectGroupingOverrides }
+          }
+        }))
+      )
+      expect(equalOverride.commits).toBe(0)
+      const meaningful = await measure('same-owner-inventory', () => {
+        ownIds = ['codex']
+        useAppStore.setState(
+          kind === 'ssh'
+            ? { remoteDetectedAgentIds: inventory() }
+            : { runtimeDetectedAgentIds: inventory() }
+        )
+      })
+      expect(meaningful.commits).toBeGreaterThan(0)
+      await assertHostChoices('Codex', 'Claude')
+      expect(edit).not.toHaveBeenCalled()
+      view.unmount()
+      await act(async () => {})
+      const readsAfterUnmount = ownReads
+      const routesAfterUnmount = route.mock.calls.length
+      act(() => useAppStore.setState({ settingsSearchInputQuery: 'after retirement' }))
+      expect(ownReads).toBe(readsAfterUnmount)
+      expect(route).toHaveBeenCalledTimes(routesAfterUnmount)
+    } finally {
+      view.unmount()
+      route.mockRestore()
+      storedInventory.mockRestore()
+    }
   }
-})
+)
+registerRepoSourceExtentTests(rpc)
+
+registerRepositoryStagedSetupTest()

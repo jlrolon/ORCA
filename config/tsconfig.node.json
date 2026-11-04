@@ -3,6 +3,7 @@
   "include": [
     "../electron.vite.config.*",
     "./vitest.config.ts",
+    "./scripts/renderer-test-assets.ts",
     "./build-plugins/**/*",
     "./scripts/vitest-host-ports-setup.ts",
     "./scripts/vitest-caller-identity-env-setup.ts",
@@ -35,7 +36,10 @@
     "../src/wsl-guest/**/*",
     "../src/types/**/*"
   ],
-  "exclude": ["../src/main/runtime/structured-chat-coordinator-mail.test.ts"],
+  "exclude": [
+    "../src/main/runtime/structured-chat-coordinator-mail.test.ts",
+    "../src/main/persistence/applying-settings/project-grouping-peer-roundtrip.test.ts"
+  ],
   "compilerOptions": {
     "composite": true,
     "types": ["electron-vite/node"]

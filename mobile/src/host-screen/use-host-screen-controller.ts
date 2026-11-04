@@ -1,3 +1,4 @@
+import { workspaceProjectFilterSelection } from '../worktree/workspace-filter-repos'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMobileTranslation } from '../i18n/use-mobile-translation'
 import { useLocalSearchParams, usePathname } from 'expo-router'
@@ -62,7 +63,8 @@ export function useHostScreenController({
   const forgetHostClient = useForgetHostClient()
   const forceReconnectHost = useForceReconnect()
   const now = useNow(30_000)
-  const { hostCapabilities, floatingWorkspaceEnabled } = useHostProtocolGates()
+  const { hostCapabilities, floatingWorkspaceEnabled, exactProjectRepoFilters } =
+    useHostProtocolGates()
   const state = useHostScreenState(hostId, peekStoredHost(hostId))
   const settings = useHostViewSettings({ client, connState, state })
   const connectionVerdict = classifyConnection({
@@ -136,6 +138,7 @@ export function useHostScreenController({
   )
   const feed = sidebarFeed?.feed ?? null
   const sectionsResult = useHostListSections({
+    exactProjectRepoFilters,
     client,
     hostId,
     feed,
@@ -150,7 +153,7 @@ export function useHostScreenController({
     () =>
       countActiveWorkspaceFilters(
         state.view.filters,
-        uniqueRepos.map((repo) => repo.id)
+        workspaceProjectFilterSelection(uniqueRepos, state.view.filters.filterRepoIds).badgeCount
       ),
     [state.view.filters, uniqueRepos]
   )

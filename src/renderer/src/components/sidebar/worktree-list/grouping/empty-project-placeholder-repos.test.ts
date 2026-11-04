@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { getRepoHostIdentity } from '../../../../../../shared/repo-host-identity'
 import type { Repo } from '../../../../../../shared/repo-types'
 import type { Worktree } from '../../../../../../shared/worktree/types'
 import { getEmptyProjectPlaceholderRepoIds } from '../../../../../../shared/sidebar-list/empty-project-placeholder-repos'
@@ -32,6 +33,20 @@ const worktree: Worktree = {
 }
 
 describe('getEmptyProjectPlaceholderRepoIds', () => {
+  it('returns empty repo placeholders in repo grouping without project groups', () => {
+    expect(
+      Array.from(
+        getEmptyProjectPlaceholderRepoIds({
+          groupBy: 'repo',
+          repos: [repo],
+          worktreesByRepo: { [repo.id]: [] },
+          visibleWorktrees: [],
+          filterRepoIds: []
+        })
+      )
+    ).toEqual([getRepoHostIdentity(repo)])
+  })
+
   it('treats missing worktreesByRepo keys as empty for the current render', () => {
     expect(
       Array.from(
@@ -43,7 +58,7 @@ describe('getEmptyProjectPlaceholderRepoIds', () => {
           filterRepoIds: []
         })
       )
-    ).toEqual([repo.id])
+    ).toEqual([getRepoHostIdentity(repo)])
   })
 
   it('applies repo filters to empty placeholder candidates', () => {
@@ -60,7 +75,7 @@ describe('getEmptyProjectPlaceholderRepoIds', () => {
           filterRepoIds: [selectedRepo.id]
         })
       )
-    ).toEqual([selectedRepo.id])
+    ).toEqual([getRepoHostIdentity(selectedRepo)])
   })
 
   it('does not create placeholders outside repo grouping', () => {
@@ -101,7 +116,7 @@ describe('getEmptyProjectPlaceholderRepoIds', () => {
           filterRepoIds: []
         })
       )
-    ).toEqual([groupedRepo.id])
+    ).toEqual([getRepoHostIdentity(groupedRepo)])
   })
 
   it('does not create a grouped repo placeholder when one of its workspaces is visible', () => {
@@ -139,7 +154,7 @@ describe('getEmptyProjectPlaceholderRepoIds', () => {
           filterRepoIds: [selected.id]
         })
       )
-    ).toEqual([selected.id])
+    ).toEqual([getRepoHostIdentity(selected)])
   })
 
   it('placeholders only the fully-filtered members of a multi-project group', () => {
@@ -161,7 +176,7 @@ describe('getEmptyProjectPlaceholderRepoIds', () => {
           filterRepoIds: []
         })
       )
-    ).toEqual([sleeping.id])
+    ).toEqual([getRepoHostIdentity(sleeping)])
   })
 
   it('does not placeholder ungrouped neighbors of a filtered grouped member', () => {
@@ -183,6 +198,6 @@ describe('getEmptyProjectPlaceholderRepoIds', () => {
           filterRepoIds: []
         })
       )
-    ).toEqual([grouped.id])
+    ).toEqual([getRepoHostIdentity(grouped)])
   })
 })

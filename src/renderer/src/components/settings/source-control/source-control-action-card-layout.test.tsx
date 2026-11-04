@@ -20,11 +20,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { pickerLocaleFixture } from '../__fixtures__/settings-persistence-test-fixture'
 import { useAppStore } from '@/store/index'
 import type { GlobalSettings } from '../../../../../shared/global-settings-types'
-import type { TuiAgent } from '../../../../../shared/agent-launch/catalog/tui-agent'
-import type {
-  AiActionId,
-  SourceControlActionLaunchPreferences
-} from '../../../../../shared/source-control/ai/recipes/source-control-ai-actions'
+import { Row } from './source-control-action-card-layout.test-fixture'
 import { STRUCTURED_AGENT_SESSION_REGISTERED_AGENTS_RUNTIME_CAPABILITY } from '../../../../../shared/agent-session/structured-agent-session-surface-capabilities'
 import {
   loadHostStructuredAgents,
@@ -80,51 +76,6 @@ const localeWork = {
 const unused = vi.fn()
 function configure(patch: Partial<GlobalSettings>) {
   useAppStore.setState(({ settings }) => ({ settings: settings && { ...settings, ...patch } }))
-}
-function Row({
-  agent = 'claude',
-  actionId = 'fixChecks',
-  dirty = false
-}: {
-  agent?: TuiAgent
-  actionId?: AiActionId
-  dirty?: boolean
-}) {
-  const [draft, setDraft] = useState({ agentArgs: '--saved', commandInputTemplate: 'Do the work' })
-  const [preferences, setPreferences] = useState<SourceControlActionLaunchPreferences | undefined>({
-    agentId: 'claude',
-    model: 'sonnet',
-    options: { effort: 'high' },
-    permissionMode: 'full-access'
-  })
-  return (
-    <TooltipProvider>
-      <SourceControlActionRecipeRow
-        actionId={actionId}
-        selectedAgent={agent}
-        defaultTuiAgent="claude"
-        draftValue={draft}
-        baseValue={draft}
-        isSavingTemplate={false}
-        hasUnsavedChanges={dirty}
-        launchPreferences={preferences}
-        onLaunchPreferencesChange={(_id, value, agentArgs) => {
-          setPreferences(value)
-          if (agentArgs !== undefined) {
-            setDraft({ ...draft, agentArgs })
-          }
-        }}
-        onAgentArgsChange={(_id, agentArgs) => setDraft({ ...draft, agentArgs })}
-        onAgentChange={unused}
-        onTemplateChange={(_id, commandInputTemplate) =>
-          setDraft((draft) => ({ ...draft, commandInputTemplate }))
-        }
-        onAppendVariable={unused}
-        onDiscard={unused}
-        onSave={unused}
-      />
-    </TooltipProvider>
-  )
 }
 beforeEach(() => {
   resetHostStructuredAgentsForTests()
@@ -238,6 +189,7 @@ it.each(['', null, '--verbose', undefined])(
     render(
       <TooltipProvider>
         <RepositorySourceControlAiActionRows
+          repo={TEST_REPO}
           repoId="repo"
           repoAi={repoAi}
           source={source}

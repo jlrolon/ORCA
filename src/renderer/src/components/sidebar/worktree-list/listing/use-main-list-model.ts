@@ -33,6 +33,7 @@ import {
   getVisibleSidebarHostIdSet
 } from '../../../../../../shared/sidebar-list/host-filtering'
 import { mergeDraggedHostSectionOrder } from '../../../../../../shared/sidebar-list/host-section-order'
+import { collectHeaderRevealPlacements } from '../../../../../../shared/sidebar-list/header-reveal-placement'
 import type { HostSectionRow } from '../../../../../../shared/sidebar-list/host-section-rows'
 import type { Worktree } from '../../../../../../shared/worktree/types'
 import { getWorktreeHostIdentity } from '../../../../../../shared/worktree/host-qualified-identity'
@@ -165,7 +166,13 @@ export function useMainSidebarListModel(args: SidebarListModelArgs): SidebarList
           ? [args.agentSendTargetWorktreeId]
           : undefined,
         importedWorktreesByRepo,
-        newExternalWorktreesInboxByRepo
+        newExternalWorktreesInboxByRepo,
+        creationHostById: new Map(
+          pendingCreationKeys.map((key) => {
+            const separator = key.indexOf(' ')
+            return [key.slice(0, separator), key.slice(separator + 1, key.indexOf('\0', separator))]
+          })
+        )
       }),
     [
       domains,
@@ -173,6 +180,7 @@ export function useMainSidebarListModel(args: SidebarListModelArgs): SidebarList
       catalog,
       view,
       rankedIds,
+      pendingCreationKeys,
       args.agentSendTargetWorktreeId,
       importedWorktreesByRepo,
       newExternalWorktreesInboxByRepo
@@ -234,6 +242,14 @@ export function useMainSidebarListModel(args: SidebarListModelArgs): SidebarList
     () => renderSidebarFeedRows(planned, view, effectiveCollapsedGroups, hostDragActive),
     [planned, view, effectiveCollapsedGroups, hostDragActive]
   )
+  const headerRevealPlacements = useMemo(
+    () =>
+      collectHeaderRevealPlacements(
+        renderSidebarFeedRows(planned, view, PLANNED_UNCOLLAPSED).sectionRows,
+        planned.plan.headerRevealPaths
+      ),
+    [planned, view]
+  )
   const sectionRows = useMemo(
     () =>
       rendered.sectionRows.map((row): HostSectionRow => {
@@ -277,6 +293,7 @@ export function useMainSidebarListModel(args: SidebarListModelArgs): SidebarList
     externalWorktreeCards,
     rowModel: {
       occurrencePlan: planned.plan.occurrencePlan,
+      headerRevealPlacements,
       hostOptions: planned.orderedHostOptions,
       effectiveCollapsedGroups,
       rows: rendered.rows,
