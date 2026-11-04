@@ -98,7 +98,7 @@ export function windowsClientHintPlatformVersion(systemVersion: string): string 
   return '10.0.0'
 }
 
-// Chromium emits numeric major.minor.bugfix; kernel releases carry suffixes ("6.8.0-45-generic").
+// Chromium emits numeric major.minor.bugfix; drop any non-numeric tail.
 export function numericClientHintPlatformVersion(systemVersion: string): string {
   const match = systemVersion.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?/)
   return match ? `${match[1]}.${match[2] ?? '0'}.${match[3] ?? '0'}` : ''
@@ -106,9 +106,15 @@ export function numericClientHintPlatformVersion(systemVersion: string): string 
 
 function desktopPlatformVersion(): string {
   const systemVersion = process.getSystemVersion?.() ?? ''
-  return process.platform === 'win32'
-    ? windowsClientHintPlatformVersion(systemVersion)
-    : numericClientHintPlatformVersion(systemVersion)
+  if (process.platform === 'win32') {
+    return windowsClientHintPlatformVersion(systemVersion)
+  }
+  if (process.platform === 'darwin') {
+    return numericClientHintPlatformVersion(systemVersion)
+  }
+  // Chromium sends an empty platform version on Linux; a kernel version would both
+  // mismatch that fingerprint and expose entropy Chromium withholds.
+  return ''
 }
 
 // Chromium reports the hardware architecture: an x64 build translated on ARM still presents arm.

@@ -24,9 +24,9 @@ describe('windowsClientHintPlatformVersion', () => {
 
 describe('numericClientHintPlatformVersion', () => {
   it.each([
-    ['a Linux kernel release suffix', '6.8.0-45-generic', '6.8.0'],
     ['a two-component macOS version', '15.1', '15.1.0'],
     ['a three-component macOS version', '14.6.1', '14.6.1'],
+    ['a version with a non-numeric tail', '14.6.1 (build)', '14.6.1'],
     ['a non-numeric version', 'unknown', '']
   ])('normalizes %s to numeric major.minor.bugfix', (_label, systemVersion, expected) => {
     expect(numericClientHintPlatformVersion(systemVersion)).toBe(expected)
