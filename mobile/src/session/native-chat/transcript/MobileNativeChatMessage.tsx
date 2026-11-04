@@ -1,7 +1,3 @@
-import {
-  nativeChatTextAttachmentPaths,
-  chatTextAttachmentName
-} from '../../../../../src/shared/native-chat-text-attachment-references'
 import { memo, useCallback, useContext, useLayoutEffect, useMemo, useRef } from 'react'
 import { Text, View } from 'react-native'
 import { INLINE_TEXT_SELECTION } from '../../../components/inline-text-selection'
@@ -28,6 +24,7 @@ import { MobileNativeChatTurnStatus } from './MobileNativeChatTurnStatus'
 import { MobileNativeChatNoticeRow } from './MobileNativeChatNoticeRow'
 import { MobileNativeChatRowOverlaysContext } from './mobile-native-chat-row-overlays'
 import { MobileNativeChatUserMessageFold } from './MobileNativeChatUserMessageFold'
+import { TextAttachmentActions } from './MobileNativeChatTextAttachmentActions'
 import { MobileNativeChatMessageTime } from './MobileNativeChatMessageTime'
 import { MobileNativeChatAwaitingInputRow } from './MobileNativeChatAwaitingInputRow'
 import { MobileNativeChatResolutionReceipt } from '../MobileNativeChatResolutionReceipt'
@@ -37,6 +34,11 @@ import {
 } from '../../../../../src/shared/native-chat/input/native-chat-ask-row'
 import type { NativeChatResolvedPrompt } from '../../../../../src/shared/native-chat/native-chat-resolution-receipt'
 import { MobileNativeChatSubagentGroup } from './MobileNativeChatSubagentGroup'
+import { MobileNativeChatBackgroundTaskRun } from './MobileNativeChatBackgroundTaskRun'
+import {
+  backgroundTaskBlocks,
+  withoutBackgroundTaskRows
+} from '../../../../../src/shared/native-chat/input/native-chat-background-task-row'
 import { ToolRun } from './MobileNativeChatToolRun'
 import type { NativeChatTurnStatus } from '../../../../../src/shared/native-chat/transcript/native-chat-turn-status'
 import { styles } from './mobile-native-chat-message-styles'
@@ -155,7 +157,9 @@ function MobileNativeChatMessageImpl({
     () => nativeChatToolRunViewedImages(run?.blocks ?? message.blocks),
     [run, message.blocks]
   )
-  const drawnProse = isReasoning ? [] : withoutSubagentGroupTwins(prose)
+  // Task rows replace their plain-text twins, which the host writes for readers without task blocks.
+  const drawnProse = isReasoning ? [] : withoutSubagentGroupTwins(withoutBackgroundTaskRows(prose))
+  const backgroundTasks = isReasoning ? [] : backgroundTaskBlocks(prose)
   const isSystem = message.role === 'system'
   const showToolRun = tools.length > 0
   const askPending = structuredActivityUi
@@ -339,6 +343,9 @@ function MobileNativeChatMessageImpl({
               {isUser ? null : showFull}
             </>
           )}
+          {backgroundTasks.map((task) => (
+            <MobileNativeChatBackgroundTaskRun key={task.taskId} block={task} />
+          ))}
           {askRow}
           {showToolRun ? (
             <ToolRun
@@ -392,22 +399,3 @@ function MobileNativeChatMessageImpl({
 }
 
 export const MobileNativeChatMessage = memo(MobileNativeChatMessageImpl)
-
-const TextAttachmentActions = memo(function TextAttachmentActions(props: {
-  text: string
-  pastedText: string
-  onOpenFile?: (path: string) => void
-}) {
-  const { text, pastedText, onOpenFile } = props
-  const paths = useMemo(() => nativeChatTextAttachmentPaths(text), [text])
-  return paths.map((path) => (
-    <Text
-      key={path}
-      accessibilityRole="button"
-      onPress={() => onOpenFile?.(path)}
-      style={styles.agentAttribution}
-    >
-      {chatTextAttachmentName(path, pastedText)}
-    </Text>
-  ))
-})
