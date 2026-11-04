@@ -63,20 +63,43 @@ function createFieldOrderIndex(field: GitHubProjectField): ReadonlyMap<string, n
   return indices
 }
 
+/** Empty bucket shared by value-less fields (e.g. Parent issue) and blank field values. */
+function emptyFieldGrouping(field: GitHubProjectField): {
+  key: string
+  label: string
+  orderHint: number
+  iteration: ProjectGroup['iteration']
+} {
+  return {
+    key: EMPTY_PROJECT_GROUP_KEY,
+    label: labelForEmpty(field),
+    orderHint: UNKNOWN_INDEX_SENTINEL,
+    iteration: null
+  }
+}
+
 // Preserve the mobile mirror's fallback for partial ordering metadata.
 function getFieldValueForGrouping(
   row: GitHubProjectRow,
   field: GitHubProjectField,
   orderIndex: ReadonlyMap<string, number>
 ): { key: string; label: string; orderHint: number; iteration: ProjectGroup['iteration'] } {
+  // GitHub never returns a value for the built-in Parent issue field, so fieldValuesByFieldId is
+  // always empty; key off the normalized parent issue instead of the (absent) field value (#38099).
+  if (field.dataType === 'PARENT_ISSUE') {
+    const parent = row.content.parentIssue
+    return parent
+      ? {
+          key: `parent:${parent.number}`,
+          label: `#${parent.number}`,
+          orderHint: UNKNOWN_INDEX_SENTINEL - 1,
+          iteration: null
+        }
+      : emptyFieldGrouping(field)
+  }
   const value = row.fieldValuesByFieldId[field.id]
   if (!hasNonEmptyFieldValue(value)) {
-    return {
-      key: EMPTY_PROJECT_GROUP_KEY,
-      label: labelForEmpty(field),
-      orderHint: UNKNOWN_INDEX_SENTINEL,
-      iteration: null
-    }
+    return emptyFieldGrouping(field)
   }
   if (field.kind === 'iteration' && value.kind === 'iteration') {
     const iterations = field.iterations ?? []
