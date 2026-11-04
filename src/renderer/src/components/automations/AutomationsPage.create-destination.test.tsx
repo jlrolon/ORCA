@@ -553,7 +553,7 @@ describe('AutomationsPage edit fencing', () => {
   }
 
   async function expectUnavailableSave(draft: unknown): Promise<void> {
-    const { ensureHooksConfirmed } = await import('@/lib/ensure-hooks-confirmed')
+    const { ensureHooksApproved } = await import('@/lib/ensure-hooks-confirmed')
     const { checkRuntimeHooks } = await import('@/runtime/runtime-hooks-client')
     // Opening may read hooks; Save must refuse before any further probe.
     vi.mocked(checkRuntimeHooks).mockClear()
@@ -568,7 +568,7 @@ describe('AutomationsPage edit fencing', () => {
         expect.stringMatching(/^automation\.(?:create|update|delete|runNow|precheck)$/)
       ])
     )
-    expect(ensureHooksConfirmed).not.toHaveBeenCalled()
+    expect(ensureHooksApproved).not.toHaveBeenCalled()
     expect(checkRuntimeHooks).not.toHaveBeenCalled()
     expect(mocks.editorDialog?.open).toBe(true)
     expect(mocks.editorDialog?.draft).toEqual(draft)
@@ -649,8 +649,8 @@ describe('AutomationsPage create admission', () => {
     await save()
 
     expect(mocks.editorDialog?.notice?.message).toBeTruthy()
-    const { ensureHooksConfirmed } = await import('@/lib/ensure-hooks-confirmed')
-    expect(vi.mocked(ensureHooksConfirmed)).not.toHaveBeenCalled()
+    const { ensureHooksApproved } = await import('@/lib/ensure-hooks-confirmed')
+    expect(vi.mocked(ensureHooksApproved)).not.toHaveBeenCalled()
     expect(api.automations.create).not.toHaveBeenCalled()
   })
 })

@@ -125,6 +125,8 @@ export type Automation = {
   workspaceId: string | null
   baseBranch: string | null
   setupDecision?: SetupDecision
+  /** Hash of the setup content approved with `run`; a run whose branch content differs skips setup. Older automations omit it. */
+  setupTrustHash?: string
   reuseSession: boolean
   timezone: string
   rrule: string
@@ -199,6 +201,7 @@ export type AutomationCreateInput = {
   workspaceId?: string | null
   baseBranch?: string | null
   setupDecision?: SetupDecision
+  setupTrustHash?: string
   reuseSession?: boolean
   timezone: string
   rrule: string
@@ -222,6 +225,7 @@ export type AutomationUpdateInput = { launchSetupPatch?: AutomationLaunchSetupPa
     | 'workspaceId'
     | 'baseBranch'
     | 'setupDecision'
+    | 'setupTrustHash'
     | 'reuseSession'
     | 'timezone'
     | 'rrule'

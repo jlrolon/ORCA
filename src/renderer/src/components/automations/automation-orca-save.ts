@@ -17,7 +17,7 @@ import type {
 } from '../../../../shared/automations-types'
 import { getRepoExecutionHostId } from '../../../../shared/execution-host'
 import { buildAutomationRrule } from '../../../../shared/automation-schedule-occurrences'
-import { ensureHooksConfirmed } from '@/lib/ensure-hooks-confirmed'
+import { ensureHooksApproved } from '@/lib/ensure-hooks-confirmed'
 import { translate } from '@/i18n/i18n'
 import { useAppStore } from '@/store'
 import { listAutomationsForTarget } from './automation-host-client'
@@ -144,16 +144,14 @@ export async function saveOrcaAutomation(
           draftSetupDecision: draft.setupDecision
         })
       : currentAutomation.setupDecision
-  if (setupDecision === 'run' && ((targetEdited && !recordedContext) || edited('setupDecision'))) {
-    const trustDecision = await ensureHooksConfirmed(
-      useAppStore.getState(),
-      draft.projectId,
-      'setup',
-      setupHostId
-    )
-    if (trustDecision === 'skip') {
-      setupDecision = 'skip'
-    }
+  const trust =
+    setupDecision === 'run' && ((targetEdited && !recordedContext) || edited('setupDecision'))
+      ? await ensureHooksApproved(useAppStore.getState(), draft.projectId, 'setup', setupHostId)
+      : null
+  // Stored with `run` so later runs execute only this content.
+  const setupTrustHash = trust?.approvedContentHash
+  if (trust?.decision === 'skip') {
+    setupDecision = 'skip'
   }
 
   const runContext = targetEdited
@@ -211,6 +209,7 @@ export async function saveOrcaAutomation(
     ...(edited('setupDecision') || setupDecision !== currentAutomation?.setupDecision
       ? { setupDecision }
       : {}),
+    ...(setupTrustHash ? { setupTrustHash } : {}),
     ...(edited('reuseSession') || edited('workspaceMode')
       ? { reuseSession: draft.workspaceMode === 'existing' && draft.reuseSession }
       : {}),
@@ -232,6 +231,7 @@ export async function saveOrcaAutomation(
     workspaceId: currentAutomation ? currentAutomation.workspaceId : draft.workspaceId,
     baseBranch: currentAutomation ? currentAutomation.baseBranch : draft.baseBranch.trim() || null,
     setupDecision: currentAutomation ? currentAutomation.setupDecision : setupDecision,
+    setupTrustHash: currentAutomation ? currentAutomation.setupTrustHash : setupTrustHash,
     reuseSession: currentAutomation
       ? currentAutomation.reuseSession
       : draft.workspaceMode === 'existing' && draft.reuseSession,
