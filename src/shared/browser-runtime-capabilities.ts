@@ -18,6 +18,8 @@ export const BROWSER_CLIENT_FILE_CHANNEL_RUNTIME_CAPABILITY =
 export const BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY = 'network.browserTunnel.v1' as const
 export const BROWSER_NETWORK_EXECUTION_HOSTS_RUNTIME_CAPABILITY =
   'network.browserTunnel.executionHosts.v1' as const
+// A phone draws pages in its own web view and sends their traffic through this host.
+export const MOBILE_BROWSER_TUNNEL_RUNTIME_CAPABILITY = 'network.mobileBrowserTunnel.v1' as const
 
 // Older hosts drop expectUrl and would act unguarded, so the CLI refuses the flag without this.
 export const BROWSER_EXPECT_URL_RUNTIME_CAPABILITY = 'browser.expect-url.v1' as const
@@ -33,5 +35,6 @@ export const BROWSER_RUNTIME_CAPABILITIES = [
   BROWSER_CLIENT_AUTOMATION_RUNTIME_CAPABILITY,
   BROWSER_CLIENT_FILE_CHANNEL_RUNTIME_CAPABILITY,
   BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY,
-  BROWSER_NETWORK_EXECUTION_HOSTS_RUNTIME_CAPABILITY
+  BROWSER_NETWORK_EXECUTION_HOSTS_RUNTIME_CAPABILITY,
+  MOBILE_BROWSER_TUNNEL_RUNTIME_CAPABILITY
 ] as const
