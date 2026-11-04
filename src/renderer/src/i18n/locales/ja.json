@@ -17247,8 +17247,6 @@
           "clear": "引数をクリア",
           "unsupported": "この Agent は追加の引数にまだ対応していません。",
           "label": "追加の Agent 引数",
-          "needsFreshSession": "追加の引数を使うには、実行ごとに新しいセッションが必要です。",
-          "useFreshSessions": "新しいセッションを使用",
           "helper": "新しいセッションごとに、このホストのデフォルト引数に追加されます。",
           "detailLabel": "追加の引数"
         },
@@ -17272,6 +17270,7 @@
           "runStatusPending": "キュー待ち",
           "runStatusDispatching": "起動中",
           "runStatusDispatched": "起動済み",
+          "runStatusSent": "送信済み",
           "runStatusCompleted": "完了",
           "runStatusSkippedPrecheck": "事前チェックによりスキップ",
           "runStatusSkippedMissed": "スキップ済み",

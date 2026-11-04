@@ -17695,8 +17695,6 @@
           "clear": "清除引數",
           "unsupported": "此代理程式暫不支援額外引數。",
           "label": "額外的代理程式引數",
-          "needsFreshSession": "額外引數要求每次執行都使用新工作階段。",
-          "useFreshSessions": "使用新工作階段",
           "helper": "每次新工作階段時附加到此主機的預設引數之後。",
           "detailLabel": "額外引數"
         },
@@ -17720,6 +17718,7 @@
           "runStatusPending": "已排隊",
           "runStatusDispatching": "正在啟動",
           "runStatusDispatched": "已啟動",
+          "runStatusSent": "已傳送",
           "runStatusCompleted": "已完成",
           "runStatusSkippedPrecheck": "因預檢查而略過",
           "runStatusSkippedMissed": "已略過",

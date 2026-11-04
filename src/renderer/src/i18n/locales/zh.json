@@ -17247,8 +17247,6 @@
           "clear": "清除参数",
           "unsupported": "此智能体暂不支持额外参数。",
           "label": "额外的智能体参数",
-          "needsFreshSession": "额外参数要求每次运行都使用新会话。",
-          "useFreshSessions": "使用新会话",
           "helper": "每次新会话时附加到此主机的默认参数之后。",
           "detailLabel": "额外参数"
         },
@@ -17272,6 +17270,7 @@
           "runStatusPending": "已排队",
           "runStatusDispatching": "正在启动",
           "runStatusDispatched": "已启动",
+          "runStatusSent": "已发送",
           "runStatusCompleted": "完成",
           "runStatusSkippedPrecheck": "因预检查而跳过",
           "runStatusSkippedMissed": "已跳过",
